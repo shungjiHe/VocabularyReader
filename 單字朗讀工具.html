@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>單字朗讀工具</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 20px;
+        }
+        textarea {
+            width: 80%;
+            height: 150px;
+            font-size: 18px;
+            padding: 10px;
+            margin: 10px;
+            resize: none;
+        }
+        button, select, input {
+            font-size: 18px;
+            padding: 10px;
+            margin: 5px;
+        }
+        .highlight {
+            background-color: blue;
+            color: white;
+            padding: 3px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>輸入單字，每行一個，讓它們朗讀</h2>
+
+    <textarea id="textInput" placeholder="每行輸入一個單字或句子..."></textarea>
+    
+    <br>
+
+    <label for="repeatCount">每個單字朗讀次數：</label>
+    <input type="number" id="repeatCount" min="1" max="10" value="3">
+
+    <br>
+
+    <label for="rateSelect">語速：</label>
+    <input type="range" id="rateSelect" min="0.5" max="2" step="0.1" value="1">
+    <span id="rateValue">1.0</span>
+
+    <br>
+
+    <button onclick="startSpeaking()">開始朗讀</button>
+    <button onclick="togglePause()">暫停 / 繼續</button>
+    <button onclick="shuffleWords()">隨機排序</button>
+    <button id="toggleHighlightBtn" onclick="toggleHighlight()">顯示目前朗讀的單字</button>
+
+    <h3>目前朗讀的單字：</h3>
+    <p id="currentWordDisplay"></p>
+
+    <script>
+        let voices = [];
+        let isPaused = false;
+        let isHighlightEnabled = false;
+        let currentIndex = 0;
+        let words = [];
+        let repeatCount = 3;
+        let selectedVoice;
+        let synth = window.speechSynthesis;
+        let isSpeaking = false;
+
+        function loadVoices() {
+            voices = synth.getVoices().filter(voice => 
+                voice.lang === "en-US" && 
+                (voice.name.includes("Google") || voice.name.includes("Apple") || voice.name.includes("Natural"))
+            );
+
+            if (voices.length === 0) {
+                voices = synth.getVoices().filter(voice => voice.lang === "en-US");
+            }
+
+            if (voices.length > 0) {
+                selectedVoice = voices[0];
+            }
+        }
+
+        synth.onvoiceschanged = loadVoices;
+        loadVoices();
+
+        function startSpeaking() {
+            let text = document.getElementById("textInput").value.trim();
+            if (!text) {
+                alert("請輸入文字！");
+                return;
+            }
+
+            words = text.split(/\n+/).map(line => line.trim()).filter(line => line);
+            repeatCount = parseInt(document.getElementById("repeatCount").value, 10);
+
+            if (voices.length === 0) {
+                alert("未找到適合的美式英語語音，請稍後再試！");
+                return;
+            }
+
+            currentIndex = 0;
+            isPaused = false;
+            isSpeaking = true;
+            speakNextWord();
+        }
+
+        function speakNextWord() {
+            if (!isSpeaking || isPaused || currentIndex >= words.length) return;
+
+            let word = words[currentIndex];
+
+            function speakWord(count, callback) {
+                if (count <= 0 || isPaused) {
+                    callback();
+                    return;
+                }
+
+                let utterance = new SpeechSynthesisUtterance(word);
+                utterance.voice = selectedVoice;
+                utterance.rate = parseFloat(document.getElementById("rateSelect").value); // 即時抓語速
+
+                utterance.onstart = function () {
+                    if (isHighlightEnabled) {
+                        highlightCurrentWord(word);
+                    } else {
+                        clearHighlight();
+                    }
+                };
+
+                utterance.onend = function () {
+                    if (!isPaused) {
+                        setTimeout(() => speakWord(count - 1, callback), 800);
+                    }
+                };
+
+                synth.speak(utterance);
+            }
+
+            speakWord(repeatCount, function () {
+                if (!isPaused) {
+                    currentIndex++;
+                    speakNextWord();
+                }
+            });
+        }
+
+        function togglePause() {
+            if (isSpeaking) {
+                if (isPaused) {
+                    isPaused = false;
+                    speakNextWord();
+                } else {
+                    isPaused = true;
+                    synth.cancel();
+                }
+            }
+        }
+
+        function shuffleWords() {
+            if (words.length === 0) {
+                alert("請先開始朗讀！");
+                return;
+            }
+
+            synth.cancel();
+            isSpeaking = false;
+
+            setTimeout(() => {
+                words = words.sort(() => Math.random() - 0.5);
+                currentIndex = 0;
+                document.getElementById("textInput").value = words.join('\n');
+
+                alert("單字順序已隨機打亂！");
+
+                isSpeaking = true;
+                isPaused = false;
+                speakNextWord();
+            }, 300);
+        }
+
+        function toggleHighlight() {
+            isHighlightEnabled = !isHighlightEnabled;
+            const btn = document.getElementById("toggleHighlightBtn");
+            btn.textContent = isHighlightEnabled ? "隱藏目前朗讀的單字" : "顯示目前朗讀的單字";
+
+            if (!isHighlightEnabled) {
+                clearHighlight();
+            }
+        }
+
+        function highlightCurrentWord(word) {
+            document.getElementById("currentWordDisplay").innerHTML =
+                `<span class="highlight">${word}</span>`;
+        }
+
+        function clearHighlight() {
+            document.getElementById("currentWordDisplay").innerHTML = "";
+        }
+
+        document.getElementById("rateSelect").addEventListener("input", function () {
+            document.getElementById("rateValue").textContent = this.value;
+        });
+    </script>
+
+</body>
+</html>
