@@ -1,209 +1,1628 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>單字朗讀工具</title>
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0">
+
+    <title>英文朗讀工具</title>
+
     <style>
         body {
             font-family: Arial, sans-serif;
             text-align: center;
             margin: 20px;
         }
+
         textarea {
             width: 80%;
-            height: 150px;
+            height: 220px;
             font-size: 18px;
             padding: 10px;
             margin: 10px;
-            resize: none;
+            resize: vertical;
         }
-        button, select, input {
+
+        button,
+        select,
+        input {
             font-size: 18px;
             padding: 10px;
             margin: 5px;
         }
+
+        .setting-row {
+            margin: 10px;
+        }
+
         .highlight {
+            display: inline-block;
             background-color: blue;
             color: white;
-            padding: 3px;
+            padding: 6px 10px;
             border-radius: 5px;
+        }
+
+        .voice-info {
+            margin: 10px auto;
+            padding: 10px;
+            width: 80%;
+            max-width: 900px;
+            background-color: #f5f5f5;
+            border-radius: 6px;
+            text-align: left;
+            line-height: 1.8;
+        }
+
+        .speaker-label {
+            font-weight: bold;
+            margin-right: 6px;
+        }
+
+        #dialogDelayValue,
+        #rateValue {
+            display: inline-block;
+            min-width: 70px;
         }
     </style>
 </head>
+
 <body>
 
-    <h2>輸入單字，每行一個，讓它們朗讀</h2>
+    <h2>英文朗讀工具</h2>
 
-    <textarea id="textInput" placeholder="每行輸入一個單字或句子..."></textarea>
-    
-    <br>
+    <!-- ========================================================= -->
+    <!-- Mode -->
 
-    <label for="repeatCount">每個單字朗讀次數：</label>
-    <input type="number" id="repeatCount" min="1" max="10" value="3">
+    <div class="setting-row">
 
-    <br>
+        <label for="modeSelect">
+            模式：
+        </label>
 
-    <label for="rateSelect">語速：</label>
-    <input type="range" id="rateSelect" min="0.5" max="2" step="0.1" value="1">
-    <span id="rateValue">1.0</span>
+        <select id="modeSelect">
 
-    <br>
+            <option value="word">
+                單字模式
+            </option>
 
-    <button onclick="startSpeaking()">開始朗讀</button>
-    <button onclick="togglePause()">暫停 / 繼續</button>
-    <button onclick="shuffleWords()">隨機排序</button>
-    <button id="toggleHighlightBtn" onclick="toggleHighlight()">顯示目前朗讀的單字</button>
+            <option value="dialog">
+                對話模式
+            </option>
 
-    <h3>目前朗讀的單字：</h3>
+        </select>
+
+    </div>
+
+    <!-- ========================================================= -->
+    <!-- Input -->
+
+    <textarea
+        id="textInput"
+        placeholder="每行輸入一個單字或句子..."></textarea>
+
+    <!-- ========================================================= -->
+    <!-- Word Mode Settings -->
+
+    <div
+        id="repeatSetting"
+        class="setting-row">
+
+        <label for="repeatCount">
+            每個單字朗讀次數：
+        </label>
+
+        <input
+            type="number"
+            id="repeatCount"
+            min="1"
+            max="10"
+            value="3">
+
+    </div>
+
+    <!-- ========================================================= -->
+    <!-- Dialog Mode Settings -->
+
+    <div
+        id="dialogSetting"
+        class="setting-row"
+        style="display: none;">
+
+        <label for="dialogDelay">
+            額外對話間隔：
+        </label>
+
+        <input
+            type="range"
+            id="dialogDelay"
+            min="0"
+            max="1000"
+            step="100"
+            value="0">
+
+        <span id="dialogDelayValue">
+            0 ms
+        </span>
+
+    </div>
+
+    <!-- ========================================================= -->
+    <!-- Speech Rate -->
+
+    <div class="setting-row">
+
+        <label for="rateSelect">
+            語速：
+        </label>
+
+        <input
+            type="range"
+            id="rateSelect"
+            min="0.5"
+            max="2.0"
+            step="0.1"
+            value="0.9">
+
+        <span id="rateValue">
+            0.9x
+        </span>
+
+    </div>
+
+    <!-- ========================================================= -->
+    <!-- Voice Information -->
+
+    <div
+        id="voiceInfo"
+        class="voice-info">
+
+        <div>
+            <span class="speaker-label">
+                A 男聲：
+            </span>
+
+            <span id="voiceADisplay">
+                載入中...
+            </span>
+        </div>
+
+        <div>
+            <span class="speaker-label">
+                B 女聲：
+            </span>
+
+            <span id="voiceBDisplay">
+                載入中...
+            </span>
+        </div>
+
+    </div>
+
+    <!-- ========================================================= -->
+    <!-- Buttons -->
+
+    <div>
+
+        <button onclick="startSpeaking()">
+            開始朗讀
+        </button>
+
+        <button onclick="togglePause()">
+            暫停 / 繼續
+        </button>
+
+        <button onclick="stopSpeaking()">
+            停止
+        </button>
+
+        <button
+            id="shuffleButton"
+            onclick="shuffleWords()">
+            隨機排序
+        </button>
+
+        <button
+            id="toggleHighlightBtn"
+            onclick="toggleHighlight()">
+            顯示目前朗讀內容
+        </button>
+
+    </div>
+
+    <!-- ========================================================= -->
+    <!-- Current Text -->
+
+    <h3>
+        目前朗讀：
+    </h3>
+
     <p id="currentWordDisplay"></p>
 
+    <!-- ========================================================= -->
+    <!-- JavaScript -->
+
     <script>
+
+        // =========================================================
+        // Global Variables
+
+        const synth =
+            window.speechSynthesis;
+
         let voices = [];
-        let isPaused = false;
-        let isHighlightEnabled = false;
+
+        let selectedVoiceA = null;
+        let selectedVoiceB = null;
+
+        let lines = [];
+
         let currentIndex = 0;
-        let words = [];
-        let repeatCount = 3;
-        let selectedVoice;
-        let synth = window.speechSynthesis;
+
         let isSpeaking = false;
+        let isPaused = false;
+
+        let isHighlightEnabled = false;
+
+        /*
+            每次重新開始或停止時增加。
+
+            用途：
+            防止上一輪朗讀留下來的 setTimeout()
+            在新的朗讀流程中又被執行。
+        */
+        let speechSessionId = 0;
+
+
+        // =========================================================
+        // Voice
 
         function loadVoices() {
-            voices = synth.getVoices().filter(voice => 
-                voice.lang === "en-US" && 
-                (voice.name.includes("Google") || voice.name.includes("Apple") || voice.name.includes("Natural"))
+
+            const allVoices =
+                synth.getVoices();
+
+            /*
+                只保留美式英文。
+
+                某些瀏覽器可能回傳：
+                    en-US
+
+                某些可能大小寫略有不同，
+                所以統一轉小寫比較。
+            */
+            voices =
+                allVoices.filter(
+                    voice =>
+                        voice.lang &&
+                        voice.lang.toLowerCase() === "en-us"
+                );
+
+
+            if (voices.length === 0) {
+
+                selectedVoiceA = null;
+                selectedVoiceB = null;
+
+                updateVoiceDisplay();
+
+                return;
+            }
+
+
+            // -----------------------------------------------------
+            // A - Male
+
+            const maleNames = [
+                // Microsoft / Windows
+				"Guy",
+                "Andrew",
+                "Brian",
+                "Davis",
+                "Christopher",
+                "Eric",
+                "Jason",
+                "Roger",
+                "Tony"
+				
+				// Apple / iPhone / Safari
+				"Aaron",
+				"Fred",
+				"Alex"
+            ];
+
+
+            // -----------------------------------------------------
+            // B - Female
+
+            const femaleNames = [
+                "Jenny",
+                "Aria",
+                "Ava",
+                "Emma",
+                "Michelle",
+                "Sara",
+                "Nancy",
+                "Jane"
+				
+				// Apple / iPhone / Safari
+				"Samantha",
+				"Nicky",
+				"Victoria"
+            ];
+
+
+            selectedVoiceA =
+                findBestNaturalVoice(
+                    voices,
+                    maleNames
+                );
+
+
+            selectedVoiceB =
+                findBestNaturalVoice(
+                    voices,
+                    femaleNames
+                );
+				
+            updateVoiceDisplay();
+
+
+            console.log(
+                "Available en-US voices:",
+                voices
             );
 
-            if (voices.length === 0) {
-                voices = synth.getVoices().filter(voice => voice.lang === "en-US");
+            console.log(
+                "A Male Voice:",
+                selectedVoiceA?.name
+            );
+
+            console.log(
+                "B Female Voice:",
+                selectedVoiceB?.name
+            );
+        }
+
+
+        // =========================================================
+        // Find Best Voice
+
+        function findBestNaturalVoice(
+            voiceList,
+            preferredNames) {
+
+            // -----------------------------------------------------
+            // Priority 1
+            // Online + Natural + Preferred Person
+
+            for (const personName of preferredNames) {
+
+                const voice =
+                    voiceList.find(
+                        v =>
+                            containsIgnoreCase(
+                                v.name,
+                                personName
+                            ) &&
+                            containsIgnoreCase(
+                                v.name,
+                                "Natural"
+                            ) &&
+                            containsIgnoreCase(
+                                v.name,
+                                "Online"
+                            )
+                    );
+
+                if (voice) {
+                    return voice;
+                }
             }
 
-            if (voices.length > 0) {
-                selectedVoice = voices[0];
+
+            // -----------------------------------------------------
+            // Priority 2
+            // Natural + Preferred Person
+
+            for (const personName of preferredNames) {
+
+                const voice =
+                    voiceList.find(
+                        v =>
+                            containsIgnoreCase(
+                                v.name,
+                                personName
+                            ) &&
+                            containsIgnoreCase(
+                                v.name,
+                                "Natural"
+                            )
+                    );
+
+                if (voice) {
+                    return voice;
+                }
+            }
+
+
+            // -----------------------------------------------------
+            // Priority 3
+            // Preferred Person
+
+            for (const personName of preferredNames) {
+
+                const voice =
+                    voiceList.find(
+                        v =>
+                            containsIgnoreCase(
+                                v.name,
+                                personName
+                            )
+                    );
+
+                if (voice) {
+                    return voice;
+                }
+            }
+
+            return null;
+        }
+
+
+        // =========================================================
+        // Case-insensitive Contains
+
+        function containsIgnoreCase(
+            source,
+            target) {
+
+            if (!source || !target) {
+                return false;
+            }
+
+            return source
+                .toLowerCase()
+                .includes(
+                    target.toLowerCase()
+                );
+        }
+
+
+        // =========================================================
+        // Voice Display
+
+        function updateVoiceDisplay() {
+
+            const voiceADisplay =
+                document.getElementById(
+                    "voiceADisplay"
+                );
+
+            const voiceBDisplay =
+                document.getElementById(
+                    "voiceBDisplay"
+                );
+
+
+            if (selectedVoiceA) {
+
+                voiceADisplay.textContent =
+                    selectedVoiceA.name;
+
+            }
+            else {
+
+                voiceADisplay.textContent =
+                    "找不到適合的美式英文 Voice";
+            }
+
+
+            if (selectedVoiceB) {
+
+                voiceBDisplay.textContent =
+                    selectedVoiceB.name;
+
+            }
+            else {
+
+                voiceBDisplay.textContent =
+                    "找不到適合的美式英文 Voice";
             }
         }
 
-        synth.onvoiceschanged = loadVoices;
+
+        // =========================================================
+        // Load Voices
+
+        synth.onvoiceschanged =
+            loadVoices;
+
         loadVoices();
 
+
+        /*
+            Chrome / Edge 有時第一次 getVoices()
+            會回傳空陣列。
+
+            再稍後讀取一次。
+        */
+        setTimeout(
+            loadVoices,
+            500
+        );
+
+
+        // =========================================================
+        // Start Speaking
+
         function startSpeaking() {
-            let text = document.getElementById("textInput").value.trim();
+
+            const text =
+                document
+                    .getElementById(
+                        "textInput"
+                    )
+                    .value
+                    .trim();
+
+
             if (!text) {
-                alert("請輸入文字！");
+
+                alert(
+                    "請輸入文字！"
+                );
+
                 return;
             }
 
-            words = text.split(/\n+/).map(line => line.trim()).filter(line => line);
-            repeatCount = parseInt(document.getElementById("repeatCount").value, 10);
 
-            if (voices.length === 0) {
-                alert("未找到適合的美式英語語音，請稍後再試！");
-                return;
+            if (!selectedVoiceA ||
+                !selectedVoiceB) {
+
+                loadVoices();
             }
+
+
+            const mode =
+    document.getElementById(
+        "modeSelect"
+    ).value;
+
+if (!selectedVoiceA) {
+
+    alert(
+        "找不到適合的美式英文男性 Voice。"
+    );
+
+    return;
+}
+
+if (mode === "dialog" &&
+    !selectedVoiceB) {
+
+    alert(
+        "找不到適合的美式英文女性 Voice。"
+    );
+
+    return;
+}
+
+
+            /*
+                終止上一輪朗讀。
+            */
+            synth.cancel();
+
+            speechSessionId++;
+
+            const currentSessionId =
+                speechSessionId;
+
+
+            lines =
+                text
+                    .split(/\r?\n/)
+                    .map(
+                        line =>
+                            line.trim()
+                    )
+                    .filter(
+                        line =>
+                            line.length > 0
+                    );
+
 
             currentIndex = 0;
+
             isPaused = false;
             isSpeaking = true;
-            speakNextWord();
+
+
+            speakNext(
+                currentSessionId
+            );
         }
 
-        function speakNextWord() {
-            if (!isSpeaking || isPaused || currentIndex >= words.length) return;
 
-            let word = words[currentIndex];
+        // =========================================================
+        // Speak Next
 
-            function speakWord(count, callback) {
-                if (count <= 0 || isPaused) {
-                    callback();
-                    return;
+        function speakNext(
+            sessionId) {
+
+            if (sessionId !== speechSessionId) {
+                return;
+            }
+
+
+            if (!isSpeaking) {
+                return;
+            }
+
+
+            if (isPaused) {
+                return;
+            }
+
+
+            if (currentIndex >= lines.length) {
+
+                isSpeaking = false;
+
+                clearHighlight();
+
+                return;
+            }
+
+
+            const mode =
+                document.getElementById(
+                    "modeSelect"
+                ).value;
+
+
+            if (mode === "dialog") {
+
+                const delay =
+                    getDialogDelay();
+
+                /*
+                    0 ms：一次把剩餘對話全部排入
+                    speechSynthesis Queue，讓 A/B 銜接最快。
+
+                    > 0 ms：保留原本逐句播放方式，
+                    才能插入指定的額外停頓。
+                */
+                if (delay === 0) {
+
+                    queueDialog(
+                        sessionId
+                    );
+
+                }
+                else {
+
+                    speakDialogLine(
+                        sessionId
+                    );
                 }
 
-                let utterance = new SpeechSynthesisUtterance(word);
-                utterance.voice = selectedVoice;
-                utterance.rate = parseFloat(document.getElementById("rateSelect").value); // 即時抓語速
+            }
+            else {
 
-                utterance.onstart = function () {
+                speakWordLine(
+                    sessionId
+                );
+            }
+        }
+
+
+        // =========================================================
+        // Word Mode
+
+        function speakWordLine(
+            sessionId) {
+
+            const text =
+                lines[currentIndex];
+
+
+            let repeatCount =
+                parseInt(
+                    document.getElementById(
+                        "repeatCount"
+                    ).value,
+                    10
+                );
+
+
+            if (Number.isNaN(repeatCount) ||
+                repeatCount < 1) {
+
+                repeatCount = 1;
+            }
+
+
+            speakRepeatedly(
+                text,
+                repeatCount,
+                selectedVoiceA,
+                800,
+                sessionId,
+                function () {
+
+                    if (sessionId !== speechSessionId) {
+                        return;
+                    }
+
+                    currentIndex++;
+
+                    speakNext(
+                        sessionId
+                    );
+                }
+            );
+        }
+
+
+        // =========================================================
+        // Repeat Word
+
+        function speakRepeatedly(
+            text,
+            count,
+            voice,
+            delay,
+            sessionId,
+            callback) {
+
+            if (sessionId !== speechSessionId) {
+                return;
+            }
+
+
+            if (!isSpeaking ||
+                isPaused) {
+
+                return;
+            }
+
+
+            if (count <= 0) {
+
+                callback();
+
+                return;
+            }
+
+
+            speakText(
+                text,
+                voice,
+                sessionId,
+                null,
+                function () {
+
+                    if (sessionId !== speechSessionId) {
+                        return;
+                    }
+
+
+                    if (!isSpeaking ||
+                        isPaused) {
+
+                        return;
+                    }
+
+
+                    setTimeout(
+                        function () {
+
+                            if (sessionId !== speechSessionId) {
+                                return;
+                            }
+
+                            speakRepeatedly(
+                                text,
+                                count - 1,
+                                voice,
+                                delay,
+                                sessionId,
+                                callback
+                            );
+
+                        },
+                        delay
+                    );
+                }
+            );
+        }
+
+
+        // =========================================================
+        // Dialog Delay
+
+        function getDialogDelay() {
+
+            const delay =
+                parseInt(
+                    document.getElementById(
+                        "dialogDelay"
+                    ).value,
+                    10
+                );
+
+            return Number.isNaN(delay)
+                ? 0
+                : delay;
+        }
+
+
+        // =========================================================
+        // Dialog Queue Mode
+
+        function queueDialog(
+            sessionId) {
+
+            if (sessionId !== speechSessionId) {
+                return;
+            }
+
+
+            if (!isSpeaking ||
+                isPaused) {
+
+                return;
+            }
+
+
+            if (currentIndex >= lines.length) {
+
+                isSpeaking = false;
+
+                clearHighlight();
+
+                return;
+            }
+
+
+            const startIndex =
+                currentIndex;
+
+            const rate =
+                parseFloat(
+                    document.getElementById(
+                        "rateSelect"
+                    ).value
+                );
+
+
+            for (
+                let index = startIndex;
+                index < lines.length;
+                index++
+            ) {
+
+                const text =
+                    lines[index];
+
+                const isSpeakerA =
+                    index % 2 === 0;
+
+                const voice =
+                    isSpeakerA
+                        ? selectedVoiceA
+                        : selectedVoiceB;
+
+                const speaker =
+                    isSpeakerA
+                        ? "A"
+                        : "B";
+
+                const utterance =
+                    new SpeechSynthesisUtterance(
+                        text
+                    );
+
+
+                utterance.voice =
+                    voice;
+
+                utterance.lang =
+                    "en-US";
+
+                utterance.pitch =
+                    1.0;
+
+                utterance.rate =
+                    rate;
+
+                utterance.volume =
+                    1.0;
+
+
+                utterance.onstart =
+                    function () {
+
+                        if (sessionId !== speechSessionId ||
+                            !isSpeaking ||
+                            isPaused) {
+
+                            return;
+                        }
+
+
+                        currentIndex =
+                            index;
+
+
+                        if (isHighlightEnabled) {
+
+                            highlightCurrentText(
+                                text,
+                                speaker
+                            );
+
+                        }
+                        else {
+
+                            clearHighlight();
+                        }
+                    };
+
+
+                utterance.onend =
+                    function () {
+
+                        if (sessionId !== speechSessionId ||
+                            !isSpeaking ||
+                            isPaused) {
+
+                            return;
+                        }
+
+
+                        if (index === lines.length - 1) {
+
+                            currentIndex =
+                                lines.length;
+
+                            isSpeaking =
+                                false;
+
+                            clearHighlight();
+
+                        }
+                        else {
+
+                            currentIndex =
+                                index + 1;
+                        }
+                    };
+
+
+                utterance.onerror =
+                    function (event) {
+
+                        if (event.error === "interrupted" ||
+                            event.error === "canceled") {
+
+                            return;
+                        }
+
+
+                        console.error(
+                            "Speech error:",
+                            event.error
+                        );
+                    };
+
+
+                synth.speak(
+                    utterance
+                );
+            }
+        }
+
+
+        // =========================================================
+        // Dialog Mode With Extra Delay
+
+        function speakDialogLine(
+            sessionId) {
+
+            const text =
+                lines[currentIndex];
+
+
+            /*
+                Line 0 → A
+                Line 1 → B
+                Line 2 → A
+                Line 3 → B
+                ...
+            */
+
+            const isSpeakerA =
+                currentIndex % 2 === 0;
+
+
+            const voice =
+                isSpeakerA
+                    ? selectedVoiceA
+                    : selectedVoiceB;
+
+
+            const speaker =
+                isSpeakerA
+                    ? "A"
+                    : "B";
+
+
+            speakText(
+                text,
+                voice,
+                sessionId,
+                speaker,
+                function () {
+
+                    if (sessionId !== speechSessionId) {
+                        return;
+                    }
+
+
+                    if (!isSpeaking ||
+                        isPaused) {
+
+                        return;
+                    }
+
+
+                    currentIndex++;
+
+
+                    const delay =
+                        getDialogDelay();
+
+
+                    if (delay === 0) {
+
+                        speakNext(
+                            sessionId
+                        );
+
+                    }
+                    else {
+
+                        setTimeout(
+                            function () {
+
+                                if (sessionId !== speechSessionId) {
+                                    return;
+                                }
+
+                                speakNext(
+                                    sessionId
+                                );
+
+                            },
+                            delay
+                        );
+                    }
+                }
+            );
+        }
+
+
+        // =========================================================
+        // Common Speech Function
+
+        function speakText(
+            text,
+            voice,
+            sessionId,
+            speaker,
+            callback) {
+
+            if (sessionId !== speechSessionId) {
+                return;
+            }
+
+
+            const utterance =
+                new SpeechSynthesisUtterance(
+                    text
+                );
+
+
+            utterance.voice =
+                voice;
+
+
+            /*
+                強制美式英文。
+            */
+            utterance.lang =
+                "en-US";
+
+
+            /*
+                不人工改變男女聲 Pitch。
+
+                Natural Voice 本身已經包含
+                原本男性 / 女性的聲音特徵。
+            */
+            utterance.pitch =
+                1.0;
+
+
+            /*
+                即時取得目前語速。
+            */
+            utterance.rate =
+                parseFloat(
+                    document.getElementById(
+                        "rateSelect"
+                    ).value
+                );
+
+
+            utterance.volume =
+                1.0;
+
+
+            // -----------------------------------------------------
+            // Start
+
+            utterance.onstart =
+                function () {
+
+                    if (sessionId !== speechSessionId) {
+                        return;
+                    }
+
+
                     if (isHighlightEnabled) {
-                        highlightCurrentWord(word);
-                    } else {
+
+                        highlightCurrentText(
+                            text,
+                            speaker
+                        );
+
+                    }
+                    else {
+
                         clearHighlight();
                     }
                 };
 
-                utterance.onend = function () {
-                    if (!isPaused) {
-                        setTimeout(() => speakWord(count - 1, callback), 800);
+
+            // -----------------------------------------------------
+            // End
+
+            utterance.onend =
+                function () {
+
+                    if (sessionId !== speechSessionId) {
+                        return;
+                    }
+
+
+                    if (callback) {
+                        callback();
                     }
                 };
 
-                synth.speak(utterance);
-            }
 
-            speakWord(repeatCount, function () {
-                if (!isPaused) {
-                    currentIndex++;
-                    speakNextWord();
-                }
-            });
+            // -----------------------------------------------------
+            // Error
+
+            utterance.onerror =
+                function (event) {
+
+                    /*
+                        cancel() 可能會產生
+                        interrupted / canceled，
+                        這種不用跳錯誤。
+                    */
+
+                    if (event.error === "interrupted" ||
+                        event.error === "canceled") {
+
+                        return;
+                    }
+
+
+                    console.error(
+                        "Speech error:",
+                        event.error
+                    );
+                };
+
+
+            synth.speak(
+                utterance
+            );
         }
+
+
+        // =========================================================
+        // Pause / Resume
 
         function togglePause() {
-            if (isSpeaking) {
-                if (isPaused) {
-                    isPaused = false;
-                    speakNextWord();
-                } else {
-                    isPaused = true;
-                    synth.cancel();
-                }
-            }
-        }
 
-        function shuffleWords() {
-            if (words.length === 0) {
-                alert("請先開始朗讀！");
+            if (!isSpeaking) {
                 return;
             }
 
-            synth.cancel();
-            isSpeaking = false;
 
-            setTimeout(() => {
-                words = words.sort(() => Math.random() - 0.5);
-                currentIndex = 0;
-                document.getElementById("textInput").value = words.join('\n');
+            if (isPaused) {
 
-                alert("單字順序已隨機打亂！");
+                /*
+                    目前採用：
+                    暫停後重新從目前這一句開始。
 
-                isSpeaking = true;
+                    相較 speechSynthesis.resume()
+                    在 Chrome / Edge 上比較穩定。
+                */
+
                 isPaused = false;
-                speakNextWord();
-            }, 300);
+
+                const currentSessionId =
+                    speechSessionId;
+
+                speakNext(
+                    currentSessionId
+                );
+
+            }
+            else {
+
+                isPaused = true;
+
+                /*
+                    cancel() 會停止目前正在講的內容。
+
+                    Resume 時會重新朗讀目前這一句。
+                */
+                synth.cancel();
+            }
         }
 
+
+        // =========================================================
+        // Stop
+
+        function stopSpeaking() {
+
+            speechSessionId++;
+
+            synth.cancel();
+
+            isSpeaking = false;
+
+            isPaused = false;
+
+            currentIndex = 0;
+
+            clearHighlight();
+        }
+
+
+        // =========================================================
+        // Shuffle
+
+        function shuffleWords() {
+
+            const mode =
+                document.getElementById(
+                    "modeSelect"
+                ).value;
+
+
+            /*
+                對話不能 Shuffle。
+
+                否則 A/B 對話順序會完全被破壞。
+            */
+            if (mode === "dialog") {
+
+                alert(
+                    "對話模式不能隨機排序。"
+                );
+
+                return;
+            }
+
+
+            const text =
+                document
+                    .getElementById(
+                        "textInput"
+                    )
+                    .value
+                    .trim();
+
+
+            if (!text) {
+
+                alert(
+                    "請先輸入單字！"
+                );
+
+                return;
+            }
+
+
+            const tempLines =
+                text
+                    .split(/\r?\n/)
+                    .map(
+                        line =>
+                            line.trim()
+                    )
+                    .filter(
+                        line =>
+                            line.length > 0
+                    );
+
+
+            /*
+                Fisher-Yates Shuffle
+            */
+            for (
+                let i =
+                    tempLines.length - 1;
+
+                i > 0;
+
+                i--
+            ) {
+
+                const j =
+                    Math.floor(
+                        Math.random() *
+                        (i + 1)
+                    );
+
+
+                [
+                    tempLines[i],
+                    tempLines[j]
+                ] =
+                [
+                    tempLines[j],
+                    tempLines[i]
+                ];
+            }
+
+
+            document.getElementById(
+                "textInput"
+            ).value =
+                tempLines.join(
+                    "\n"
+                );
+        }
+
+
+        // =========================================================
+        // Highlight
+
         function toggleHighlight() {
-            isHighlightEnabled = !isHighlightEnabled;
-            const btn = document.getElementById("toggleHighlightBtn");
-            btn.textContent = isHighlightEnabled ? "隱藏目前朗讀的單字" : "顯示目前朗讀的單字";
+
+            isHighlightEnabled =
+                !isHighlightEnabled;
+
+
+            const button =
+                document.getElementById(
+                    "toggleHighlightBtn"
+                );
+
+
+            button.textContent =
+                isHighlightEnabled
+                    ? "隱藏目前朗讀內容"
+                    : "顯示目前朗讀內容";
+
 
             if (!isHighlightEnabled) {
                 clearHighlight();
             }
         }
 
-        function highlightCurrentWord(word) {
-            document.getElementById("currentWordDisplay").innerHTML =
-                `<span class="highlight">${word}</span>`;
+
+        // =========================================================
+        // Highlight Current Text
+
+        function highlightCurrentText(
+            text,
+            speaker) {
+
+            const display =
+                document.getElementById(
+                    "currentWordDisplay"
+                );
+
+
+            let displayText =
+                escapeHtml(
+                    text
+                );
+
+
+            if (speaker) {
+
+                displayText =
+                    "<strong>" +
+                    speaker +
+                    "：</strong> " +
+                    displayText;
+            }
+
+
+            display.innerHTML =
+                '<span class="highlight">' +
+                displayText +
+                "</span>";
         }
+
+
+        // =========================================================
+        // Clear Highlight
 
         function clearHighlight() {
-            document.getElementById("currentWordDisplay").innerHTML = "";
+
+            document.getElementById(
+                "currentWordDisplay"
+            ).innerHTML =
+                "";
         }
 
-        document.getElementById("rateSelect").addEventListener("input", function () {
-            document.getElementById("rateValue").textContent = this.value;
-        });
+
+        // =========================================================
+        // Escape HTML
+
+        function escapeHtml(
+            text) {
+
+            const div =
+                document.createElement(
+                    "div"
+                );
+
+            div.textContent =
+                text;
+
+            return div.innerHTML;
+        }
+
+
+        // =========================================================
+        // Rate Slider
+
+        document
+            .getElementById(
+                "rateSelect"
+            )
+            .addEventListener(
+                "input",
+                function () {
+
+                    document
+                        .getElementById(
+                            "rateValue"
+                        )
+                        .textContent =
+                            parseFloat(
+                                this.value
+                            ).toFixed(1) +
+                            "x";
+                }
+            );
+
+
+        // =========================================================
+        // Dialog Delay Slider
+
+        document
+            .getElementById(
+                "dialogDelay"
+            )
+            .addEventListener(
+                "input",
+                function () {
+
+                    document
+                        .getElementById(
+                            "dialogDelayValue"
+                        )
+                        .textContent =
+                            this.value +
+                            " ms";
+                }
+            );
+
+
+        // =========================================================
+        // Mode Change
+
+        document
+            .getElementById(
+                "modeSelect"
+            )
+            .addEventListener(
+                "change",
+                function () {
+
+                    /*
+                        切換模式時停止目前朗讀。
+                    */
+                    stopSpeaking();
+
+
+                    const isDialog =
+                        this.value ===
+                        "dialog";
+
+
+                    // ---------------------------------------------
+                    // Word Repeat
+
+                    document
+                        .getElementById(
+                            "repeatSetting"
+                        )
+                        .style
+                        .display =
+                            isDialog
+                                ? "none"
+                                : "block";
+
+
+                    // ---------------------------------------------
+                    // Dialog Delay
+
+                    document
+                        .getElementById(
+                            "dialogSetting"
+                        )
+                        .style
+                        .display =
+                            isDialog
+                                ? "block"
+                                : "none";
+
+
+                    // ---------------------------------------------
+                    // Shuffle Button
+
+                    document
+                        .getElementById(
+                            "shuffleButton"
+                        )
+                        .disabled =
+                            isDialog;
+
+
+                    // ---------------------------------------------
+                    // Placeholder
+
+                    document
+                        .getElementById(
+                            "textInput"
+                        )
+                        .placeholder =
+                            isDialog
+                                ? "每行輸入一句對話，程式會自動以 A / B 交替朗讀..."
+                                : "每行輸入一個單字或句子...";
+                }
+            );
+
     </script>
 
 </body>
