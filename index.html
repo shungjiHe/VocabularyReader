@@ -293,7 +293,7 @@
                 allVoices.filter(
                     voice =>
                         voice.lang &&
-                        voice.lang.toLowerCase() === "en-us"
+                        voice.lang.toLowerCase().startsWith("en-")
                 );
 
 
