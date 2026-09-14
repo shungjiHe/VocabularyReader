@@ -175,31 +175,27 @@
     <!-- ========================================================= -->
     <!-- Voice Information -->
 
-    <div
-        id="voiceInfo"
-        class="voice-info">
+    <div>
+    	<span class="speaker-label">
+        	A 聲音：
+    	</span>
 
-        <div>
-            <span class="speaker-label">
-                A 男聲：
-            </span>
+    	<select
+        	id="voiceASelect"
+        	onchange="changeVoiceA()">
+    	</select>
+	</div>
 
-            <span id="voiceADisplay">
-                載入中...
-            </span>
-        </div>
+	<div>
+    	<span class="speaker-label">
+        	B 聲音：
+    	</span>
 
-        <div>
-            <span class="speaker-label">
-                B 女聲：
-            </span>
-
-            <span id="voiceBDisplay">
-                載入中...
-            </span>
-        </div>
-
-    </div>
+    	<select
+        	id="voiceBSelect"
+        	onchange="changeVoiceB()">
+    	</select>
+	</div>
 
     <!-- ========================================================= -->
     <!-- Buttons -->
@@ -366,6 +362,22 @@
                     voices,
                     femaleNames
                 );
+
+			if (!selectedVoiceA) {
+
+    selectedVoiceA =
+        voices[0];
+}
+
+
+if (!selectedVoiceB) {
+
+    selectedVoiceB =
+        voices.find(
+            voice =>
+                voice !== selectedVoiceA
+        ) || voices[0];
+}
 				
             updateVoiceDisplay();
 
@@ -493,45 +505,162 @@
 
         // =========================================================
         // Voice Display
+function updateVoiceDisplay() {
 
-        function updateVoiceDisplay() {
+    const voiceASelect =
+        document.getElementById(
+            "voiceASelect"
+        );
 
-            const voiceADisplay =
-                document.getElementById(
-                    "voiceADisplay"
+    const voiceBSelect =
+        document.getElementById(
+            "voiceBSelect"
+        );
+
+
+    voiceASelect.innerHTML = "";
+    voiceBSelect.innerHTML = "";
+
+
+    if (voices.length === 0) {
+
+        const optionA =
+            document.createElement(
+                "option"
+            );
+
+        optionA.textContent =
+            "找不到美式英文 Voice";
+
+        voiceASelect.appendChild(
+            optionA
+        );
+
+
+        const optionB =
+            document.createElement(
+                "option"
+            );
+
+        optionB.textContent =
+            "找不到美式英文 Voice";
+
+        voiceBSelect.appendChild(
+            optionB
+        );
+
+        return;
+    }
+
+
+    voices.forEach(
+        function (
+            voice,
+            index) {
+
+            const optionA =
+                document.createElement(
+                    "option"
                 );
 
-            const voiceBDisplay =
-                document.getElementById(
-                    "voiceBDisplay"
+            optionA.value =
+                index;
+
+            optionA.textContent =
+                voice.name;
+
+            voiceASelect.appendChild(
+                optionA
+            );
+
+
+            const optionB =
+                document.createElement(
+                    "option"
                 );
 
+            optionB.value =
+                index;
 
-            if (selectedVoiceA) {
+            optionB.textContent =
+                voice.name;
 
-                voiceADisplay.textContent =
-                    selectedVoiceA.name;
-
-            }
-            else {
-
-                voiceADisplay.textContent =
-                    "找不到適合的美式英文 Voice";
-            }
-
-
-            if (selectedVoiceB) {
-
-                voiceBDisplay.textContent =
-                    selectedVoiceB.name;
-
-            }
-            else {
-
-                voiceBDisplay.textContent =
-                    "找不到適合的美式英文 Voice";
-            }
+            voiceBSelect.appendChild(
+                optionB
+            );
         }
+    );
+
+
+    const voiceAIndex =
+        voices.indexOf(
+            selectedVoiceA
+        );
+
+    const voiceBIndex =
+        voices.indexOf(
+            selectedVoiceB
+        );
+
+
+    if (voiceAIndex >= 0) {
+
+        voiceASelect.value =
+            voiceAIndex;
+    }
+
+
+    if (voiceBIndex >= 0) {
+
+        voiceBSelect.value =
+            voiceBIndex;
+    }
+}
+
+		function changeVoiceA() {
+
+    const index =
+        parseInt(
+            document.getElementById(
+                "voiceASelect"
+            ).value,
+            10
+        );
+
+
+    if (Number.isNaN(index) ||
+        !voices[index]) {
+
+        return;
+    }
+
+
+    selectedVoiceA =
+        voices[index];
+}
+
+
+function changeVoiceB() {
+
+    const index =
+        parseInt(
+            document.getElementById(
+                "voiceBSelect"
+            ).value,
+            10
+        );
+
+
+    if (Number.isNaN(index) ||
+        !voices[index]) {
+
+        return;
+    }
+
+
+    selectedVoiceB =
+        voices[index];
+}
 
 
         // =========================================================
