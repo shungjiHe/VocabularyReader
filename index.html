@@ -206,6 +206,14 @@
             開始朗讀
         </button>
 
+		<button onclick="previousLine()">
+    		上一句
+		</button>
+
+		<button onclick="nextLine()">
+    		下一句
+		</button>
+
         <button onclick="togglePause()">
             暫停 / 繼續
         </button>
@@ -1376,6 +1384,145 @@ if (mode === "dialog" &&
                 utterance
             );
         }
+
+		// =========================================================
+		// Previous / Next
+
+		function previousLine() {
+
+    		moveToLine(
+        		-1
+    		);
+		}
+
+
+		function nextLine() {
+
+    		moveToLine(
+        		1
+    		);
+		}
+
+
+		function moveToLine(
+    		offset) {
+
+    		/*
+        		重新取得目前輸入內容。
+
+        		避免使用者修改 textarea 後，
+        		還使用上一輪的 lines。
+    		*/
+    		const text =
+        		document
+            		.getElementById(
+                		"textInput"
+            		)
+            		.value
+            		.trim();
+
+
+    		if (!text) {
+        		return;
+    		}
+
+
+    		const newLines =
+        		text
+            		.split(/\r?\n/)
+            		.map(
+                		line =>
+                    		line.trim()
+            		)
+            		.filter(
+                		line =>
+                    		line.length > 0
+            		);
+
+
+    		if (newLines.length === 0) {
+        		return;
+    		}
+
+
+    		lines =
+        		newLines;
+
+
+    		let targetIndex;
+
+
+    		/*
+        		如果已經整段播放完，
+        		currentIndex 會等於 lines.length。
+
+        		此時按上一句，
+        		回到最後一句。
+    		*/
+    		if (currentIndex >= lines.length) {
+
+        		if (offset < 0) {
+
+            		targetIndex =
+                		lines.length - 1;
+
+        		}
+        		else {
+
+            		return;
+        		}
+
+    		}
+    		else {
+
+        		targetIndex =
+            		currentIndex +
+            		offset;
+    		}
+
+
+    		/*
+        		已經在第一句 / 最後一句，
+        		就不要超出去。
+    		*/
+    		if (targetIndex < 0 ||
+        		targetIndex >= lines.length) {
+
+        		return;
+    		}
+
+
+    		/*
+        		取消目前正在播放以及
+        		Dialog Queue 裡尚未播放的內容。
+    		*/
+    		synth.cancel();
+
+
+    		/*
+        		讓舊的 callback / timeout 全部失效。
+    		*/
+    		speechSessionId++;
+
+
+    		currentIndex =
+        		targetIndex;
+
+    		isPaused =
+        		false;
+
+    		isSpeaking =
+        		true;
+
+
+    		const currentSessionId =
+        		speechSessionId;
+
+
+    		speakNext(
+        		currentSessionId
+    		);
+		}
 
 
         // =========================================================
