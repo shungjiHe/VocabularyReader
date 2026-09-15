@@ -121,6 +121,24 @@
             max="10"
             value="3">
 
+		<div>
+        	<label for="wordDelay">
+            	單字朗讀間隔：
+        	</label>
+
+        	<input
+            	type="range"
+            	id="wordDelay"
+            	min="0"
+            	max="1000"
+            	step="100"
+            	value="0">
+
+        	<span id="wordDelayValue">
+            	0 ms
+        	</span>
+    	</div>
+
     </div>
 
     <!-- ========================================================= -->
@@ -887,7 +905,7 @@ if (mode === "dialog" &&
                 text,
                 repeatCount,
                 selectedVoiceA,
-                800,
+                getWordDelay(),
                 sessionId,
                 function () {
 
@@ -977,6 +995,25 @@ if (mode === "dialog" &&
                 }
             );
         }
+
+		// =========================================================
+		// Word Delay
+
+		function getWordDelay() {
+
+    		const delay =
+        		parseInt(
+            		document.getElementById(
+                		"wordDelay"
+            		).value,
+            		10
+        		);
+
+
+    		return Number.isNaN(delay)
+        		? 0
+        		: delay;
+		}
 
 
         // =========================================================
@@ -1801,7 +1838,27 @@ if (mode === "dialog" &&
                 }
             );
 
+		// =========================================================
+		// Word Delay Slider
 
+		document
+    		.getElementById(
+        		"wordDelay"
+    		)
+    		.addEventListener(
+        		"input",
+        		function () {
+
+            		document
+                		.getElementById(
+                    		"wordDelayValue"
+                		)
+                		.textContent =
+                    		this.value +
+                    		" ms";
+        		}
+    		);
+		
         // =========================================================
         // Dialog Delay Slider
 
