@@ -25,6 +25,12 @@
             resize: vertical;
         }
 
+		textarea.blind-mode {
+        	color: transparent;
+        	caret-color: transparent;
+        	-webkit-text-fill-color: transparent;
+    	}
+
         button,
         select,
         input {
@@ -102,6 +108,17 @@
     <textarea
         id="textInput"
         placeholder="每行輸入一個單字或句子..."></textarea>
+
+	<div class="setting-row">
+
+    	<label>
+        	<input
+            	type="checkbox"
+            	id="blindMode">
+        	盲聽模式
+    	</label>
+
+	</div>
 
     <!-- ========================================================= -->
     <!-- Word Mode Settings -->
@@ -1814,6 +1831,29 @@ if (mode === "dialog" &&
             return div.innerHTML;
         }
 
+		// =========================================================
+		// Blind Listening Mode
+
+		document
+    		.getElementById(
+        		"blindMode"
+    		)
+    		.addEventListener(
+        		"change",
+        		function () {
+
+            		const textInput =
+                		document.getElementById(
+                    		"textInput"
+                		);
+
+
+            		textInput.classList.toggle(
+                		"blind-mode",
+                		this.checked
+            		);
+        		}
+    		);
 
         // =========================================================
         // Rate Slider
