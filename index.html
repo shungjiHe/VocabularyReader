@@ -271,6 +271,21 @@
 
     </div>
 
+	<button onclick="addCurrentToWeakList()">
+    	加入弱項
+	</button>
+
+	<label>
+    	<input
+        	type="checkbox"
+        	id="weakOnlyMode">
+    		只唸弱項清單
+	</label>
+
+	<span id="weakCount">
+    	弱項：0
+	</span>
+
     <!-- ========================================================= -->
     <!-- Current Text -->
 
@@ -298,6 +313,10 @@
 
         let lines = [];
 
+		let lineSpeakers = [];
+
+		let weakItems = [];
+
         let currentIndex = 0;
 
         let isSpeaking = false;
@@ -313,6 +332,36 @@
             在新的朗讀流程中又被執行。
         */
         let speechSessionId = 0;
+
+		// =========================================================
+		// Load Weak Items
+
+		try {
+
+    		const savedWeakItems =
+        		localStorage.getItem(
+            		"weakItems"
+        	);
+
+
+    	if (savedWeakItems) {
+
+        		weakItems =
+            		JSON.parse(
+                		savedWeakItems
+            );
+    		}
+
+		}
+		catch (error) {
+
+    		console.error(
+        		"Load weak items failed:",
+        		error
+    		);
+
+    		weakItems = [];
+		}
 
 
         // =========================================================
@@ -727,24 +776,36 @@ function changeVoiceB() {
         );
 
 
+        updateWeakCount();
+
+
         // =========================================================
         // Start Speaking
 
         function startSpeaking() {
 
-            const text =
-                document
-                    .getElementById(
-                        "textInput"
-                    )
-                    .value
-                    .trim();
+            const mode =
+                document.getElementById(
+                    "modeSelect"
+                ).value;
 
 
-            if (!text) {
+            const activeItems =
+                getActiveItems();
+
+
+            if (activeItems.length === 0) {
+
+                const weakOnly =
+                    document.getElementById(
+                        "weakOnlyMode"
+                    ).checked;
+
 
                 alert(
-                    "請輸入文字！"
+                    weakOnly
+                        ? "目前沒有弱項。"
+                        : "請輸入文字！"
                 );
 
                 return;
@@ -758,29 +819,25 @@ function changeVoiceB() {
             }
 
 
-            const mode =
-    document.getElementById(
-        "modeSelect"
-    ).value;
+            if (!selectedVoiceA) {
 
-if (!selectedVoiceA) {
+                alert(
+                    "找不到適合的英文男性 Voice。"
+                );
 
-    alert(
-        "找不到適合的美式英文男性 Voice。"
-    );
+                return;
+            }
 
-    return;
-}
 
-if (mode === "dialog" &&
-    !selectedVoiceB) {
+            if (mode === "dialog" &&
+                !selectedVoiceB) {
 
-    alert(
-        "找不到適合的美式英文女性 Voice。"
-    );
+                alert(
+                    "找不到適合的英文女性 Voice。"
+                );
 
-    return;
-}
+                return;
+            }
 
 
             /*
@@ -795,16 +852,17 @@ if (mode === "dialog" &&
 
 
             lines =
-                text
-                    .split(/\r?\n/)
-                    .map(
-                        line =>
-                            line.trim()
-                    )
-                    .filter(
-                        line =>
-                            line.length > 0
-                    );
+                activeItems.map(
+                    item =>
+                        item.text
+                );
+
+
+            lineSpeakers =
+                activeItems.map(
+                    item =>
+                        item.speaker
+                );
 
 
             currentIndex = 0;
@@ -1100,18 +1158,21 @@ if (mode === "dialog" &&
                 const text =
                     lines[index];
 
+                const speaker =
+                    lineSpeakers[index] ||
+                    (
+                        index % 2 === 0
+                            ? "A"
+                            : "B"
+                    );
+
                 const isSpeakerA =
-                    index % 2 === 0;
+                    speaker === "A";
 
                 const voice =
                     isSpeakerA
                         ? selectedVoiceA
                         : selectedVoiceB;
-
-                const speaker =
-                    isSpeakerA
-                        ? "A"
-                        : "B";
 
                 const utterance =
                     new SpeechSynthesisUtterance(
@@ -1237,20 +1298,23 @@ if (mode === "dialog" &&
                 ...
             */
 
+            const speaker =
+                lineSpeakers[currentIndex] ||
+                (
+                    currentIndex % 2 === 0
+                        ? "A"
+                        : "B"
+                );
+
+
             const isSpeakerA =
-                currentIndex % 2 === 0;
+                speaker === "A";
 
 
             const voice =
                 isSpeakerA
                     ? selectedVoiceA
                     : selectedVoiceB;
-
-
-            const speaker =
-                isSpeakerA
-                    ? "A"
-                    : "B";
 
 
             speakText(
@@ -1458,15 +1522,216 @@ if (mode === "dialog" &&
 		}
 
 
-		function moveToLine(
-    		offset) {
+        function moveToLine(
+            offset) {
 
-    		/*
-        		重新取得目前輸入內容。
+            const activeItems =
+                getActiveItems();
 
-        		避免使用者修改 textarea 後，
-        		還使用上一輪的 lines。
-    		*/
+
+            if (activeItems.length === 0) {
+                return;
+            }
+
+
+            lines =
+                activeItems.map(
+                    item =>
+                        item.text
+                );
+
+
+            lineSpeakers =
+                activeItems.map(
+                    item =>
+                        item.speaker
+                );
+
+
+            let targetIndex;
+
+
+            /*
+                如果已經整段播放完，
+                currentIndex 會等於 lines.length。
+
+                此時按上一句，
+                回到最後一句。
+            */
+            if (currentIndex >= lines.length) {
+
+                if (offset < 0) {
+
+                    targetIndex =
+                        lines.length - 1;
+
+                }
+                else {
+
+                    return;
+                }
+
+            }
+            else {
+
+                targetIndex =
+                    currentIndex +
+                    offset;
+            }
+
+
+            /*
+                已經在第一句 / 最後一句，
+                就不要超出去。
+            */
+            if (targetIndex < 0 ||
+                targetIndex >= lines.length) {
+
+                return;
+            }
+
+
+            synth.cancel();
+
+            speechSessionId++;
+
+
+            currentIndex =
+                targetIndex;
+
+            isPaused =
+                false;
+
+            isSpeaking =
+                true;
+
+
+            const currentSessionId =
+                speechSessionId;
+
+
+            speakNext(
+                currentSessionId
+            );
+        }
+
+
+        // =========================================================
+        // Weak List
+
+function addCurrentToWeakList() {
+
+    if (currentIndex < 0 ||
+        currentIndex >= lines.length) {
+
+        return;
+    }
+
+
+    const mode =
+        document.getElementById(
+            "modeSelect"
+        ).value;
+
+
+    let speaker = null;
+
+
+    if (mode === "dialog") {
+
+        speaker =
+            lineSpeakers[currentIndex] ||
+            (
+                currentIndex % 2 === 0
+                    ? "A"
+                    : "B"
+            );
+    }
+
+
+    const text =
+        lines[currentIndex];
+
+
+    const alreadyExists =
+        weakItems.some(
+            item =>
+                item.text === text &&
+                item.mode === mode &&
+                item.speaker === speaker
+        );
+
+
+    if (alreadyExists) {
+
+        return;
+    }
+
+
+    weakItems.push({
+        text:
+            text,
+
+        mode:
+            mode,
+
+        speaker:
+            speaker
+    });
+
+
+    saveWeakItems();
+
+    updateWeakCount();
+}
+
+
+function saveWeakItems() {
+
+    localStorage.setItem(
+        "weakItems",
+        JSON.stringify(
+            weakItems
+        )
+    );
+}
+
+
+function updateWeakCount() {
+
+    document
+        .getElementById(
+            "weakCount"
+        )
+        .textContent =
+            "弱項：" +
+            weakItems.length;
+}
+
+
+		function getActiveItems() {
+
+    		const mode =
+        		document.getElementById(
+            		"modeSelect"
+        		).value;
+
+
+    		const weakOnly =
+        		document.getElementById(
+            		"weakOnlyMode"
+        		).checked;
+
+
+    		if (weakOnly) {
+
+        		return weakItems.filter(
+            		item =>
+                		item.mode === mode
+        		);
+    		}
+
+
     		const text =
         		document
             		.getElementById(
@@ -1477,109 +1742,49 @@ if (mode === "dialog" &&
 
 
     		if (!text) {
-        		return;
+
+        		return [];
     		}
 
 
-    		const newLines =
-        		text
-            		.split(/\r?\n/)
-            		.map(
-                		line =>
-                    		line.trim()
-            		)
-            		.filter(
-                		line =>
-                    		line.length > 0
-            		);
+    		return text
+        		.split(/\r?\n/)
+        		.map(
+            		line =>
+                		line.trim()
+        		)
+        		.filter(
+            		line =>
+                		line.length > 0
+        		)
+        		.map(
+            		function (
+                		line,
+                		index) {
 
+                		return {
 
-    		if (newLines.length === 0) {
-        		return;
-    		}
+                    		text:
+                        		line,
 
+                    		mode:
+                        		mode,
 
-    		lines =
-        		newLines;
-
-
-    		let targetIndex;
-
-
-    		/*
-        		如果已經整段播放完，
-        		currentIndex 會等於 lines.length。
-
-        		此時按上一句，
-        		回到最後一句。
-    		*/
-    		if (currentIndex >= lines.length) {
-
-        		if (offset < 0) {
-
-            		targetIndex =
-                		lines.length - 1;
-
-        		}
-        		else {
-
-            		return;
-        		}
-
-    		}
-    		else {
-
-        		targetIndex =
-            		currentIndex +
-            		offset;
-    		}
-
-
-    		/*
-        		已經在第一句 / 最後一句，
-        		就不要超出去。
-    		*/
-    		if (targetIndex < 0 ||
-        		targetIndex >= lines.length) {
-
-        		return;
-    		}
-
-
-    		/*
-        		取消目前正在播放以及
-        		Dialog Queue 裡尚未播放的內容。
-    		*/
-    		synth.cancel();
-
-
-    		/*
-        		讓舊的 callback / timeout 全部失效。
-    		*/
-    		speechSessionId++;
-
-
-    		currentIndex =
-        		targetIndex;
-
-    		isPaused =
-        		false;
-
-    		isSpeaking =
-        		true;
-
-
-    		const currentSessionId =
-        		speechSessionId;
-
-
-    		speakNext(
-        		currentSessionId
-    		);
+                    		speaker:
+                        		mode === "dialog"
+                            		? (
+                                		index % 2 === 0
+                                    		? "A"
+                                    		: "B"
+                            		)
+                            		: null
+                		};
+            		}
+        		);
 		}
-
-
-        // =========================================================
+		
+		
+		// =========================================================
         // Pause / Resume
 
         function togglePause() {
@@ -1830,9 +2035,24 @@ if (mode === "dialog" &&
 
             return div.innerHTML;
         }
+        // =========================================================
+        // Weak Only Mode
 
-		// =========================================================
-		// Blind Listening Mode
+        document
+            .getElementById(
+                "weakOnlyMode"
+            )
+            .addEventListener(
+                "change",
+                function () {
+
+                    stopSpeaking();
+                }
+            );
+
+
+        // =========================================================
+        // Blind Listening Mode
 
 		document
     		.getElementById(
