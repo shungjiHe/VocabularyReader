@@ -72,6 +72,37 @@
             display: inline-block;
             min-width: 70px;
         }
+
+        .weak-list-panel {
+            display: none;
+            width: 80%;
+            max-width: 900px;
+            margin: 10px auto;
+            padding: 10px;
+            border: 1px solid #cccccc;
+            border-radius: 6px;
+            text-align: left;
+            background-color: #f7f7f7;
+        }
+
+        .weak-list-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 0;
+            border-bottom: 1px solid #dddddd;
+        }
+
+        .weak-list-text {
+            flex: 1;
+            word-break: break-word;
+        }
+
+        .weak-list-remove {
+            font-size: 14px;
+            padding: 5px 8px;
+            white-space: nowrap;
+        }
     </style>
 </head>
 
@@ -285,6 +316,28 @@
 	<span id="weakCount">
     	弱項：0
 	</span>
+
+    <button
+        id="toggleWeakListBtn"
+        onclick="toggleWeakList()">
+        查看弱項清單
+    </button>
+
+    <div
+        id="weakListPanel"
+        class="weak-list-panel">
+
+        <div id="weakListContent"></div>
+
+        <div style="text-align: right; margin-top: 10px;">
+            <button
+                id="clearWeakListBtn"
+                onclick="clearWeakList()">
+                清空全部
+            </button>
+        </div>
+
+    </div>
 
     <!-- ========================================================= -->
     <!-- Current Text -->
@@ -1706,6 +1759,239 @@ function updateWeakCount() {
         .textContent =
             "弱項：" +
             weakItems.length;
+
+
+    const panel =
+        document.getElementById(
+            "weakListPanel"
+        );
+
+
+    if (panel &&
+        panel.style.display !== "none") {
+
+        renderWeakList();
+    }
+}
+
+
+function toggleWeakList() {
+
+    const panel =
+        document.getElementById(
+            "weakListPanel"
+        );
+
+    const button =
+        document.getElementById(
+            "toggleWeakListBtn"
+        );
+
+
+    const isOpen =
+        panel.style.display === "block";
+
+
+    if (isOpen) {
+
+        panel.style.display =
+            "none";
+
+        button.textContent =
+            "查看弱項清單";
+
+        return;
+    }
+
+
+    renderWeakList();
+
+    panel.style.display =
+        "block";
+
+    button.textContent =
+        "隱藏弱項清單";
+}
+
+
+function renderWeakList() {
+
+    const container =
+        document.getElementById(
+            "weakListContent"
+        );
+
+    const clearButton =
+        document.getElementById(
+            "clearWeakListBtn"
+        );
+
+
+    container.innerHTML =
+        "";
+
+
+    if (weakItems.length === 0) {
+
+        const emptyMessage =
+            document.createElement(
+                "div"
+            );
+
+        emptyMessage.textContent =
+            "目前沒有弱項。";
+
+        container.appendChild(
+            emptyMessage
+        );
+
+        clearButton.disabled =
+            true;
+
+        return;
+    }
+
+
+    clearButton.disabled =
+        false;
+
+
+    weakItems.forEach(
+        function (
+            item,
+            index) {
+
+            const row =
+                document.createElement(
+                    "div"
+                );
+
+            row.className =
+                "weak-list-item";
+
+
+            const textSpan =
+                document.createElement(
+                    "span"
+                );
+
+            textSpan.className =
+                "weak-list-text";
+
+
+            let prefix =
+                item.mode === "dialog"
+                    ? "[" +
+                        (item.speaker || "?") +
+                        "] "
+                    : "[單字] ";
+
+
+            textSpan.textContent =
+                (index + 1) +
+                ". " +
+                prefix +
+                item.text;
+
+
+            const removeButton =
+                document.createElement(
+                    "button"
+                );
+
+            removeButton.className =
+                "weak-list-remove";
+
+            removeButton.textContent =
+                "移除";
+
+            removeButton.onclick =
+                function () {
+
+                    removeWeakItem(
+                        index
+                    );
+                };
+
+
+            row.appendChild(
+                textSpan
+            );
+
+            row.appendChild(
+                removeButton
+            );
+
+            container.appendChild(
+                row
+            );
+        }
+    );
+}
+
+
+function removeWeakItem(
+    index) {
+
+    if (index < 0 ||
+        index >= weakItems.length) {
+
+        return;
+    }
+
+
+    weakItems.splice(
+        index,
+        1
+    );
+
+    saveWeakItems();
+    updateWeakCount();
+
+
+    if (document
+            .getElementById(
+                "weakOnlyMode"
+            )
+            .checked) {
+
+        stopSpeaking();
+    }
+}
+
+
+function clearWeakList() {
+
+    if (weakItems.length === 0) {
+        return;
+    }
+
+
+    const confirmed =
+        confirm(
+            "確定要清空所有弱項嗎？"
+        );
+
+
+    if (!confirmed) {
+        return;
+    }
+
+
+    weakItems = [];
+
+    saveWeakItems();
+    updateWeakCount();
+
+
+    if (document
+            .getElementById(
+                "weakOnlyMode"
+            )
+            .checked) {
+
+        stopSpeaking();
+    }
 }
 
 
