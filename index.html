@@ -768,16 +768,46 @@
                 synth.getVoices();
 
             /*
-                只保留美式英文（en-US）。
+                主要保留美式英文（en-US），
+                另外保留英式英文 Daniel（en-GB）。
 
                 某些瀏覽器可能回傳大小寫略有不同，
                 所以統一轉小寫比較。
             */
             voices =
                 allVoices.filter(
-                    voice =>
-                        voice.lang &&
-                        voice.lang.toLowerCase().startsWith("en-us")
+                    voice => {
+
+                        if (!voice.lang) {
+                            return false;
+                        }
+
+
+                        const lang =
+                            voice.lang.toLowerCase();
+
+
+                        const isUsEnglish =
+                            lang.startsWith(
+                                "en-us"
+                            );
+
+
+                        const isBritishDaniel =
+                            lang.startsWith(
+                                "en-gb"
+                            ) &&
+                            containsIgnoreCase(
+                                voice.name,
+                                "Daniel"
+                            );
+
+
+                        return (
+                            isUsEnglish ||
+                            isBritishDaniel
+                        );
+                    }
                 );
 
 
@@ -835,6 +865,17 @@
 
 
             selectedVoiceA =
+                voices.find(
+                    voice =>
+                        voice.lang &&
+                        voice.lang.toLowerCase().startsWith(
+                            "en-us"
+                        ) &&
+                        containsIgnoreCase(
+                            voice.name,
+                            "Samantha"
+                        )
+                ) ||
                 findBestNaturalVoice(
                     voices,
                     maleNames
@@ -842,26 +883,38 @@
 
 
             selectedVoiceB =
+                voices.find(
+                    voice =>
+                        voice.lang &&
+                        voice.lang.toLowerCase().startsWith(
+                            "en-gb"
+                        ) &&
+                        containsIgnoreCase(
+                            voice.name,
+                            "Daniel"
+                        )
+                ) ||
                 findBestNaturalVoice(
                     voices,
                     femaleNames
                 );
 
-			if (!selectedVoiceA) {
 
-    selectedVoiceA =
-        voices[0];
-}
+            if (!selectedVoiceA) {
+
+                selectedVoiceA =
+                    voices[0];
+            }
 
 
-if (!selectedVoiceB) {
+            if (!selectedVoiceB) {
 
-    selectedVoiceB =
-        voices.find(
-            voice =>
-                voice !== selectedVoiceA
-        ) || voices[0];
-}
+                selectedVoiceB =
+                    voices.find(
+                        voice =>
+                            voice !== selectedVoiceA
+                    ) || voices[0];
+            }
 				
             updateVoiceDisplay();
 
@@ -872,12 +925,12 @@ if (!selectedVoiceB) {
             );
 
             console.log(
-                "A Male Voice:",
+                "A Dialog Voice:",
                 selectedVoiceA?.name
             );
 
             console.log(
-                "B Female Voice:",
+                "B Dialog Voice:",
                 selectedVoiceB?.name
             );
         }
