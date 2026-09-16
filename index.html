@@ -363,6 +363,28 @@
                 flex: 1 1 140px;
             }
         }
+
+
+        /* ===================================================== */
+        /* TTS Engine */
+
+        .engine-block {
+            grid-column: 1 / -1;
+        }
+
+        .engine-status {
+            color: #66707c;
+            font-size: 14px;
+        }
+
+        .engine-note {
+            margin-top: 8px;
+            color: #7a838d;
+            font-size: 13px;
+            line-height: 1.5;
+            text-align: left;
+        }
+
     </style>
 </head>
 
@@ -417,6 +439,37 @@
             </h2>
 
             <div class="settings-grid">
+
+                <div class="setting-block engine-block">
+
+                    <div class="setting-row">
+
+                        <label
+                            class="setting-label"
+                            for="ttsEngineSelect">
+                            TTS 引擎
+                        </label>
+
+                        <select id="ttsEngineSelect">
+                            <option value="auto">自動</option>
+                            <option value="kokoro">Kokoro（本機）</option>
+                            <option value="browser">瀏覽器 TTS</option>
+                        </select>
+
+                        <span
+                            id="ttsStatus"
+                            class="engine-status">
+                            偵測中...
+                        </span>
+
+                    </div>
+
+                    <div class="engine-note">
+                        自動模式：iPhone / iPad 優先使用 Kokoro；其他裝置優先使用瀏覽器 TTS。
+                        Kokoro 第一次使用需要下載模型，之後由瀏覽器快取。
+                    </div>
+
+                </div>
 
                 <div class="setting-block">
 
@@ -2913,6 +2966,1311 @@ function clearWeakList() {
             );
 
     </script>
+
+    <!-- ========================================================= -->
+    <!-- Kokoro / Browser TTS Auto Engine -->
+
+    <script>
+        // =========================================================
+        // Kokoro TTS Configuration
+
+        const KOKORO_MODEL_ID =
+            "onnx-community/Kokoro-82M-v1.0-ONNX";
+
+        const KOKORO_MODULE_URL =
+            "https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/+esm";
+
+        let kokoroModulePromise = null;
+        let kokoroInitPromise = null;
+        let kokoroTts = null;
+        let kokoroDevice = null;
+        let kokoroInitFailed = false;
+
+        let selectedKokoroVoiceA =
+            "am_michael";
+
+        let selectedKokoroVoiceB =
+            "af_heart";
+
+        /*
+            Session cache:
+            The first generation of a sentence is kept as a WAV Blob.
+            Repeating the same sentence does not run the model again.
+        */
+        const kokoroAudioCache =
+            new Map();
+
+        const kokoroPendingAudio =
+            new Map();
+
+        let kokoroAudioContext = null;
+        let currentKokoroSource = null;
+        let kokoroPlayToken = 0;
+
+
+        // =========================================================
+        // Keep Original Functions
+
+        const browserUpdateVoiceDisplay =
+            updateVoiceDisplay;
+
+        const browserChangeVoiceA =
+            changeVoiceA;
+
+        const browserChangeVoiceB =
+            changeVoiceB;
+
+        const originalStartSpeaking =
+            startSpeaking;
+
+        const originalSpeakNext =
+            speakNext;
+
+        const browserSpeakText =
+            speakText;
+
+        const browserTogglePause =
+            togglePause;
+
+        const originalStopSpeaking =
+            stopSpeaking;
+
+        const originalMoveToLine =
+            moveToLine;
+
+
+        // =========================================================
+        // Platform / Engine Selection
+
+        function isIOSDevice() {
+
+            const userAgent =
+                navigator.userAgent || "";
+
+            const normalIOS =
+                /iPhone|iPad|iPod/i.test(
+                    userAgent
+                );
+
+            /*
+                iPadOS can report itself as MacIntel.
+            */
+            const desktopModeIPad =
+                navigator.platform === "MacIntel" &&
+                navigator.maxTouchPoints > 1;
+
+            return (
+                normalIOS ||
+                desktopModeIPad
+            );
+        }
+
+
+        function getRequestedTtsEngine() {
+
+            return document
+                .getElementById(
+                    "ttsEngineSelect"
+                )
+                .value;
+        }
+
+
+        function getEffectiveTtsEngine() {
+
+            const requested =
+                getRequestedTtsEngine();
+
+
+            if (requested === "browser") {
+                return "browser";
+            }
+
+
+            if (requested === "kokoro") {
+
+                return kokoroInitFailed
+                    ? "browser"
+                    : "kokoro";
+            }
+
+
+            /*
+                Auto:
+                iPhone / iPad -> Kokoro
+                Desktop      -> Browser TTS
+
+                Kokoro initialization failure -> Browser TTS fallback.
+            */
+            if (isIOSDevice() &&
+                !kokoroInitFailed) {
+
+                return "kokoro";
+            }
+
+
+            return "browser";
+        }
+
+
+        function updateTtsStatus(
+            text) {
+
+            const status =
+                document.getElementById(
+                    "ttsStatus"
+                );
+
+
+            if (!status) {
+                return;
+            }
+
+
+            if (text) {
+
+                status.textContent =
+                    text;
+
+                return;
+            }
+
+
+            if (getEffectiveTtsEngine() ===
+                "kokoro") {
+
+                if (kokoroTts) {
+
+                    status.textContent =
+                        "目前：Kokoro / " +
+                        (
+                            kokoroDevice === "webgpu"
+                                ? "WebGPU"
+                                : "WASM"
+                        );
+
+                }
+                else {
+
+                    status.textContent =
+                        "目前：Kokoro（首次朗讀時載入）";
+                }
+
+            }
+            else {
+
+                status.textContent =
+                    "目前：瀏覽器 TTS";
+            }
+        }
+
+
+        // =========================================================
+        // Kokoro Initialization
+
+        async function unlockKokoroAudio() {
+
+            if (!kokoroAudioContext) {
+
+                const AudioContextClass =
+                    window.AudioContext ||
+                    window.webkitAudioContext;
+
+
+                if (!AudioContextClass) {
+
+                    throw new Error(
+                        "Web Audio API is not supported."
+                    );
+                }
+
+
+                kokoroAudioContext =
+                    new AudioContextClass();
+            }
+
+
+            if (kokoroAudioContext.state ===
+                "suspended") {
+
+                await kokoroAudioContext
+                    .resume();
+            }
+        }
+
+
+        async function loadKokoroModule() {
+
+            if (!kokoroModulePromise) {
+
+                kokoroModulePromise =
+                    import(
+                        KOKORO_MODULE_URL
+                    );
+            }
+
+
+            return kokoroModulePromise;
+        }
+
+
+        async function ensureKokoroReady() {
+
+            if (kokoroTts) {
+                return true;
+            }
+
+
+            if (kokoroInitPromise) {
+                return kokoroInitPromise;
+            }
+
+
+            kokoroInitFailed = false;
+
+
+            kokoroInitPromise =
+                (async function () {
+
+                    try {
+
+                        updateTtsStatus(
+                            "Kokoro：載入程式庫..."
+                        );
+
+
+                        const module =
+                            await loadKokoroModule();
+
+                        const KokoroTTS =
+                            module.KokoroTTS;
+
+
+                        if (!KokoroTTS) {
+
+                            throw new Error(
+                                "KokoroTTS module not found."
+                            );
+                        }
+
+
+                        /*
+                            Prefer WebGPU.
+                            If it fails, retry with WASM + q8.
+                        */
+                        if (navigator.gpu) {
+
+                            try {
+
+                                updateTtsStatus(
+                                    "Kokoro：載入模型（WebGPU）..."
+                                );
+
+
+                                kokoroTts =
+                                    await KokoroTTS
+                                        .from_pretrained(
+                                            KOKORO_MODEL_ID,
+                                            {
+                                                dtype:
+                                                    "fp32",
+
+                                                device:
+                                                    "webgpu"
+                                            }
+                                        );
+
+
+                                kokoroDevice =
+                                    "webgpu";
+
+                            }
+                            catch (webGpuError) {
+
+                                console.warn(
+                                    "Kokoro WebGPU failed; falling back to WASM.",
+                                    webGpuError
+                                );
+
+
+                                kokoroTts =
+                                    null;
+                            }
+                        }
+
+
+                        if (!kokoroTts) {
+
+                            updateTtsStatus(
+                                "Kokoro：載入模型（WASM）..."
+                            );
+
+
+                            kokoroTts =
+                                await KokoroTTS
+                                    .from_pretrained(
+                                        KOKORO_MODEL_ID,
+                                        {
+                                            dtype:
+                                                "q8",
+
+                                            device:
+                                                "wasm"
+                                        }
+                                    );
+
+
+                            kokoroDevice =
+                                "wasm";
+                        }
+
+
+                        populateKokoroVoiceDisplay();
+
+                        updateTtsStatus();
+
+                        return true;
+
+                    }
+                    catch (error) {
+
+                        console.error(
+                            "Kokoro initialization failed:",
+                            error
+                        );
+
+
+                        kokoroTts = null;
+                        kokoroDevice = null;
+                        kokoroInitFailed = true;
+
+
+                        updateTtsStatus(
+                            "Kokoro 載入失敗，已改用瀏覽器 TTS"
+                        );
+
+
+                        loadVoices();
+                        updateVoiceDisplay();
+
+                        return false;
+
+                    }
+                    finally {
+
+                        kokoroInitPromise =
+                            null;
+                    }
+                })();
+
+
+            return kokoroInitPromise;
+        }
+
+
+        // =========================================================
+        // Voice UI
+
+        function showKokoroVoicePlaceholder() {
+
+            const voiceASelect =
+                document.getElementById(
+                    "voiceASelect"
+                );
+
+            const voiceBSelect =
+                document.getElementById(
+                    "voiceBSelect"
+                );
+
+
+            voiceASelect.innerHTML = "";
+            voiceBSelect.innerHTML = "";
+
+
+            const optionA =
+                document.createElement(
+                    "option"
+                );
+
+            optionA.value =
+                selectedKokoroVoiceA;
+
+            optionA.textContent =
+                "Kokoro 尚未載入";
+
+
+            const optionB =
+                document.createElement(
+                    "option"
+                );
+
+            optionB.value =
+                selectedKokoroVoiceB;
+
+            optionB.textContent =
+                "Kokoro 尚未載入";
+
+
+            voiceASelect.appendChild(
+                optionA
+            );
+
+            voiceBSelect.appendChild(
+                optionB
+            );
+        }
+
+
+        function populateKokoroVoiceDisplay() {
+
+            if (!kokoroTts) {
+
+                showKokoroVoicePlaceholder();
+
+                return;
+            }
+
+
+            const voiceASelect =
+                document.getElementById(
+                    "voiceASelect"
+                );
+
+            const voiceBSelect =
+                document.getElementById(
+                    "voiceBSelect"
+                );
+
+
+            voiceASelect.innerHTML = "";
+            voiceBSelect.innerHTML = "";
+
+
+            const allVoices =
+                Object.entries(
+                    kokoroTts.voices ||
+                    {}
+                );
+
+
+            const maleVoices =
+                allVoices.filter(
+                    ([id]) =>
+                        id.startsWith(
+                            "am_"
+                        )
+                );
+
+            const femaleVoices =
+                allVoices.filter(
+                    ([id]) =>
+                        id.startsWith(
+                            "af_"
+                        )
+                );
+
+
+            function addOptions(
+                select,
+                entries) {
+
+                entries.forEach(
+                    function (
+                        [id, info]) {
+
+                        const option =
+                            document.createElement(
+                                "option"
+                            );
+
+
+                        option.value =
+                            id;
+
+                        option.textContent =
+                            (info?.name || id) +
+                            " (" +
+                            id +
+                            ")";
+
+
+                        select.appendChild(
+                            option
+                        );
+                    }
+                );
+            }
+
+
+            addOptions(
+                voiceASelect,
+                maleVoices
+            );
+
+            addOptions(
+                voiceBSelect,
+                femaleVoices
+            );
+
+
+            if (maleVoices.some(
+                    ([id]) =>
+                        id ===
+                        selectedKokoroVoiceA
+                )) {
+
+                voiceASelect.value =
+                    selectedKokoroVoiceA;
+
+            }
+            else if (maleVoices.length > 0) {
+
+                selectedKokoroVoiceA =
+                    maleVoices[0][0];
+
+                voiceASelect.value =
+                    selectedKokoroVoiceA;
+            }
+
+
+            if (femaleVoices.some(
+                    ([id]) =>
+                        id ===
+                        selectedKokoroVoiceB
+                )) {
+
+                voiceBSelect.value =
+                    selectedKokoroVoiceB;
+
+            }
+            else if (femaleVoices.length > 0) {
+
+                selectedKokoroVoiceB =
+                    femaleVoices[0][0];
+
+                voiceBSelect.value =
+                    selectedKokoroVoiceB;
+            }
+        }
+
+
+        updateVoiceDisplay =
+            function () {
+
+                if (getEffectiveTtsEngine() ===
+                    "kokoro") {
+
+                    if (kokoroTts) {
+
+                        populateKokoroVoiceDisplay();
+
+                    }
+                    else {
+
+                        showKokoroVoicePlaceholder();
+                    }
+
+                    return;
+                }
+
+
+                browserUpdateVoiceDisplay();
+            };
+
+
+        changeVoiceA =
+            function () {
+
+                if (getEffectiveTtsEngine() ===
+                    "kokoro") {
+
+                    selectedKokoroVoiceA =
+                        document
+                            .getElementById(
+                                "voiceASelect"
+                            )
+                            .value;
+
+                    return;
+                }
+
+
+                browserChangeVoiceA();
+            };
+
+
+        changeVoiceB =
+            function () {
+
+                if (getEffectiveTtsEngine() ===
+                    "kokoro") {
+
+                    selectedKokoroVoiceB =
+                        document
+                            .getElementById(
+                                "voiceBSelect"
+                            )
+                            .value;
+
+                    return;
+                }
+
+
+                browserChangeVoiceB();
+            };
+
+
+        // =========================================================
+        // Kokoro Audio Generation / Playback
+
+        function getKokoroCacheKey(
+            text,
+            voice,
+            rate) {
+
+            return (
+                voice +
+                "|" +
+                rate.toFixed(1) +
+                "|" +
+                text
+            );
+        }
+
+
+        async function getKokoroAudioBlob(
+            text,
+            voice,
+            rate) {
+
+            const key =
+                getKokoroCacheKey(
+                    text,
+                    voice,
+                    rate
+                );
+
+
+            if (kokoroAudioCache.has(
+                    key
+                )) {
+
+                return kokoroAudioCache.get(
+                    key
+                );
+            }
+
+
+            if (kokoroPendingAudio.has(
+                    key
+                )) {
+
+                return kokoroPendingAudio.get(
+                    key
+                );
+            }
+
+
+            const promise =
+                (async function () {
+
+                    const rawAudio =
+                        await kokoroTts.generate(
+                            text,
+                            {
+                                voice:
+                                    voice,
+
+                                speed:
+                                    rate
+                            }
+                        );
+
+
+                    const blob =
+                        rawAudio.toBlob();
+
+
+                    kokoroAudioCache.set(
+                        key,
+                        blob
+                    );
+
+
+                    return blob;
+                })();
+
+
+            kokoroPendingAudio.set(
+                key,
+                promise
+            );
+
+
+            try {
+
+                return await promise;
+
+            }
+            finally {
+
+                kokoroPendingAudio.delete(
+                    key
+                );
+            }
+        }
+
+
+        function stopKokoroPlayback() {
+
+            kokoroPlayToken++;
+
+
+            if (!currentKokoroSource) {
+                return;
+            }
+
+
+            try {
+
+                currentKokoroSource.onended =
+                    null;
+
+                currentKokoroSource.stop();
+
+            }
+            catch (error) {
+                // Source may already have ended.
+            }
+
+
+            currentKokoroSource =
+                null;
+        }
+
+
+        async function speakTextWithKokoro(
+            text,
+            sessionId,
+            speaker,
+            callback) {
+
+            if (sessionId !== speechSessionId ||
+                !isSpeaking ||
+                isPaused) {
+
+                return;
+            }
+
+
+            const playToken =
+                ++kokoroPlayToken;
+
+
+            const voice =
+                speaker === "B"
+                    ? selectedKokoroVoiceB
+                    : selectedKokoroVoiceA;
+
+
+            const rate =
+                parseFloat(
+                    document.getElementById(
+                        "rateSelect"
+                    ).value
+                );
+
+
+            try {
+
+                updateTtsStatus(
+                    "Kokoro：產生語音..."
+                );
+
+
+                const blob =
+                    await getKokoroAudioBlob(
+                        text,
+                        voice,
+                        rate
+                    );
+
+
+                if (playToken !== kokoroPlayToken ||
+                    sessionId !== speechSessionId ||
+                    !isSpeaking ||
+                    isPaused) {
+
+                    updateTtsStatus();
+
+                    return;
+                }
+
+
+                await unlockKokoroAudio();
+
+
+                const arrayBuffer =
+                    await blob.arrayBuffer();
+
+                const audioBuffer =
+                    await kokoroAudioContext
+                        .decodeAudioData(
+                            arrayBuffer.slice(0)
+                        );
+
+
+                if (playToken !== kokoroPlayToken ||
+                    sessionId !== speechSessionId ||
+                    !isSpeaking ||
+                    isPaused) {
+
+                    updateTtsStatus();
+
+                    return;
+                }
+
+
+                stopKokoroPlayback();
+
+                /*
+                    stopKokoroPlayback() increments the token,
+                    so this playback receives a fresh token.
+                */
+                const activeToken =
+                    ++kokoroPlayToken;
+
+
+                const source =
+                    kokoroAudioContext
+                        .createBufferSource();
+
+
+                source.buffer =
+                    audioBuffer;
+
+                source.connect(
+                    kokoroAudioContext.destination
+                );
+
+
+                currentKokoroSource =
+                    source;
+
+
+                updateReadingProgress();
+
+
+                if (isHighlightEnabled) {
+
+                    highlightCurrentText(
+                        text,
+                        speaker
+                    );
+
+                }
+                else {
+
+                    clearHighlight();
+                }
+
+
+                updateTtsStatus();
+
+
+                source.onended =
+                    function () {
+
+                        if (activeToken !==
+                            kokoroPlayToken) {
+
+                            return;
+                        }
+
+
+                        currentKokoroSource =
+                            null;
+
+
+                        if (sessionId !==
+                            speechSessionId ||
+                            !isSpeaking ||
+                            isPaused) {
+
+                            return;
+                        }
+
+
+                        if (callback) {
+                            callback();
+                        }
+                    };
+
+
+                source.start(0);
+
+            }
+            catch (error) {
+
+                console.error(
+                    "Kokoro speech failed:",
+                    error
+                );
+
+
+                kokoroInitFailed =
+                    true;
+
+
+                updateTtsStatus(
+                    "Kokoro 失敗，已改用瀏覽器 TTS"
+                );
+
+
+                loadVoices();
+                updateVoiceDisplay();
+
+
+                const browserVoice =
+                    speaker === "B"
+                        ? selectedVoiceB
+                        : selectedVoiceA;
+
+
+                if (browserVoice) {
+
+                    browserSpeakText(
+                        text,
+                        browserVoice,
+                        sessionId,
+                        speaker,
+                        callback
+                    );
+                }
+            }
+        }
+
+
+        // =========================================================
+        // Override Common Speech Function
+
+        speakText =
+            function (
+                text,
+                voice,
+                sessionId,
+                speaker,
+                callback) {
+
+                if (getEffectiveTtsEngine() ===
+                    "kokoro" &&
+                    kokoroTts) {
+
+                    speakTextWithKokoro(
+                        text,
+                        sessionId,
+                        speaker,
+                        callback
+                    );
+
+                    return;
+                }
+
+
+                browserSpeakText(
+                    text,
+                    voice,
+                    sessionId,
+                    speaker,
+                    callback
+                );
+            };
+
+
+        // =========================================================
+        // Start Speaking
+
+        startSpeaking =
+            async function () {
+
+                if (getEffectiveTtsEngine() ===
+                    "kokoro") {
+
+                    try {
+
+                        /*
+                            Run this directly from the Start button click
+                            so iPhone Safari authorizes audio output.
+                        */
+                        await unlockKokoroAudio();
+
+                    }
+                    catch (error) {
+
+                        console.warn(
+                            "Unable to unlock Web Audio:",
+                            error
+                        );
+                    }
+
+
+                    const ready =
+                        await ensureKokoroReady();
+
+
+                    if (!ready) {
+
+                        /*
+                            ensureKokoroReady() already switched
+                            effective engine to Browser TTS.
+                        */
+                        updateVoiceDisplay();
+                    }
+                }
+
+
+                originalStartSpeaking();
+            };
+
+
+        // =========================================================
+        // Dialog Playback
+
+        speakNext =
+            function (
+                sessionId) {
+
+                /*
+                    The original dialog mode uses the browser's
+                    speechSynthesis queue when delay = 0.
+
+                    Kokoro cannot use that queue, so run it line-by-line.
+                */
+                if (getEffectiveTtsEngine() ===
+                    "kokoro" &&
+                    kokoroTts &&
+                    document.getElementById(
+                        "modeSelect"
+                    ).value === "dialog") {
+
+                    if (sessionId !== speechSessionId ||
+                        !isSpeaking ||
+                        isPaused) {
+
+                        return;
+                    }
+
+
+                    if (currentIndex >= lines.length) {
+
+                        isSpeaking = false;
+
+                        clearHighlight();
+                        updateReadingProgress();
+
+                        return;
+                    }
+
+
+                    speakDialogLine(
+                        sessionId
+                    );
+
+                    return;
+                }
+
+
+                originalSpeakNext(
+                    sessionId
+                );
+            };
+
+
+        // =========================================================
+        // Pause / Resume
+
+        togglePause =
+            async function () {
+
+                if (getEffectiveTtsEngine() !==
+                    "kokoro" ||
+                    !kokoroTts) {
+
+                    browserTogglePause();
+
+                    return;
+                }
+
+
+                if (!isSpeaking) {
+                    return;
+                }
+
+
+                if (isPaused) {
+
+                    isPaused =
+                        false;
+
+
+                    if (currentKokoroSource &&
+                        kokoroAudioContext &&
+                        kokoroAudioContext.state ===
+                            "suspended") {
+
+                        await kokoroAudioContext
+                            .resume();
+
+                    }
+                    else {
+
+                        /*
+                            If pause happened while the model was generating,
+                            restart the current line. The pending/cache map
+                            prevents unnecessary duplicate inference.
+                        */
+                        speakNext(
+                            speechSessionId
+                        );
+                    }
+
+                }
+                else {
+
+                    isPaused =
+                        true;
+
+
+                    if (currentKokoroSource &&
+                        kokoroAudioContext) {
+
+                        await kokoroAudioContext
+                            .suspend();
+
+                    }
+                    else {
+
+                        /*
+                            Cancel only the pending playback request.
+                            Model inference may finish and enter cache.
+                        */
+                        kokoroPlayToken++;
+                    }
+                }
+            };
+
+
+        // =========================================================
+        // Stop / Previous / Next
+
+        stopSpeaking =
+            function () {
+
+                stopKokoroPlayback();
+
+
+                if (kokoroAudioContext &&
+                    kokoroAudioContext.state ===
+                        "suspended") {
+
+                    kokoroAudioContext
+                        .resume()
+                        .catch(
+                            () => {}
+                        );
+                }
+
+
+                originalStopSpeaking();
+
+                updateTtsStatus();
+            };
+
+
+        moveToLine =
+            function (
+                offset) {
+
+                stopKokoroPlayback();
+
+                originalMoveToLine(
+                    offset
+                );
+
+                /*
+                    Update immediately when Previous / Next is pressed.
+                */
+                updateReadingProgress();
+            };
+
+
+        // =========================================================
+        // Engine Selector
+
+        document
+            .getElementById(
+                "ttsEngineSelect"
+            )
+            .addEventListener(
+                "change",
+                function () {
+
+                    stopSpeaking();
+
+                    kokoroInitFailed =
+                        false;
+
+
+                    if (getEffectiveTtsEngine() ===
+                        "kokoro") {
+
+                        /*
+                            Do not download the large model immediately.
+                            It is initialized on the first Start click.
+                        */
+                        if (kokoroTts) {
+
+                            populateKokoroVoiceDisplay();
+
+                        }
+                        else {
+
+                            showKokoroVoicePlaceholder();
+                        }
+
+                    }
+                    else {
+
+                        loadVoices();
+                        browserUpdateVoiceDisplay();
+                    }
+
+
+                    updateTtsStatus();
+                }
+            );
+
+
+        // =========================================================
+        // Initial Engine UI
+
+        updateTtsStatus();
+
+
+        if (getEffectiveTtsEngine() ===
+            "kokoro") {
+
+            showKokoroVoicePlaceholder();
+
+        }
+        else {
+
+            loadVoices();
+        }
+
+    </script>
+
 
 </body>
 </html>
