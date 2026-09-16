@@ -354,7 +354,7 @@
 
     <!-- ========================================================= -->
     <!-- JavaScript -->
-
+	<script src="./sentence_bank.js"></script>
     <script>
 
         // =========================================================
@@ -390,6 +390,20 @@
         */
         let speechSessionId = 0;
 
+		
+		// =========================================================
+		// Load Sentence Bank
+
+		function loadSentenceBank() {
+
+    		if (!Array.isArray(sentenceBank)) {
+        		return;
+    		}
+
+    		document.getElementById("textInput").value =sentenceBank.join("\n");
+		}
+		
+		
 		// =========================================================
 		// Load Weak Items
 
@@ -2343,8 +2357,16 @@ function clearWeakList() {
                 }
             );
 
-
-        // =========================================================
+		// =========================================================
+        // Load Sentence at Index
+        
+		document.addEventListener("DOMContentLoaded",
+    	function () {
+        loadSentenceBank();
+    	}
+		);
+		
+		// =========================================================
         // Blind Listening Mode
 
 		document
