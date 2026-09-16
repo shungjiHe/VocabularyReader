@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>英文朗讀工具</title>
+    <title>英文朗讀工具 - Piper v2</title>
 
     <style>
         * {
@@ -474,7 +474,7 @@
                     <div class="engine-note">
                         自動模式：優先使用 Piper；Piper 失敗時自動退回瀏覽器 TTS。
                         Piper 使用單一 en_US-arctic-medium 模型，提供 2 男 2 女美式英文聲音。
-                        第一次使用需要下載模型與 WASM；之後會優先使用瀏覽器快取。
+                        第一次使用需要下載模型與 WASM；此版本先以相容性優先，確認可用後再加強持久快取。
                     </div>
 
                 </div>
@@ -2993,7 +2993,7 @@ function clearWeakList() {
         //   CLB = female, US
 
         const PIPER_MODULE_URL =
-            "https://cdn.jsdelivr.net/npm/piper-tts-web@1.1.2/dist/piper-tts-web.js";
+            "https://cdn.jsdelivr.net/npm/piper-tts-web@1.1.2/+esm";
 
         const PIPER_ONNX_BASE =
             "https://cdn.jsdelivr.net/npm/piper-tts-web@1.1.2/dist/onnx/";
@@ -3470,25 +3470,25 @@ function clearWeakList() {
             module,
             useWebGpu) {
 
-            if (!piperFetchProvider) {
+            /*
+                Keep the first working version intentionally simple.
 
-                piperFetchProvider =
-                    new PiperCachedFetchProvider();
-            }
+                piper-tts-web expects:
+                  - ONNX Runtime WASM assets
+                  - piper_phonemize WASM/data assets
+                  - a voice provider
 
+                We point the runtimes directly at the package's CDN assets,
+                while the voice model itself is loaded from Hugging Face by
+                HuggingFaceVoiceProvider.
+            */
 
             const voiceProvider =
-                new module.HuggingFaceVoiceProvider({
-                    provider:
-                        piperFetchProvider
-                });
+                new module.HuggingFaceVoiceProvider();
 
 
             const phonemizeRuntime =
                 new module.PhonemizeWebRuntime({
-                    provider:
-                        piperFetchProvider,
-
                     basePath:
                         PIPER_PHONEMIZE_BASE
                 });
@@ -3507,12 +3507,6 @@ function clearWeakList() {
                         basePath:
                             PIPER_ONNX_BASE,
 
-                        /*
-                            GitHub Pages does not provide the
-                            COOP/COEP headers needed for threaded WASM.
-
-                            One thread avoids SharedArrayBuffer problems.
-                        */
                         numThreads:
                             1
                     });
@@ -3675,6 +3669,24 @@ function clearWeakList() {
                             await loadPiperModule();
 
 
+                        if (
+                            !module.PiperWebEngine ||
+                            !module.OnnxWebRuntime ||
+                            !module.PhonemizeWebRuntime ||
+                            !module.HuggingFaceVoiceProvider
+                        ) {
+
+                            throw new Error(
+                                "Piper ESM module exports are incomplete."
+                            );
+                        }
+
+
+                        updateTtsStatus(
+                            "Piper：程式庫已載入，準備模型..."
+                        );
+
+
                         await initializePiperEngine(
                             module
                         );
@@ -3726,8 +3738,16 @@ function clearWeakList() {
                             false;
 
 
+                        const errorMessage =
+                            error?.message ||
+                            String(
+                                error
+                            );
+
+
                         updateTtsStatus(
-                            "Piper 載入失敗，已改用瀏覽器 TTS"
+                            "Piper 載入失敗：" +
+                            errorMessage
                         );
 
 
