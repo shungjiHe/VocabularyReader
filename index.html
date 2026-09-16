@@ -271,6 +271,10 @@
         <button onclick="startSpeaking()">
             開始朗讀
         </button>
+		
+		<button onclick="clearInput()">
+    		清除輸入
+		</button>
 
 		<button onclick="previousLine()">
     		上一句
@@ -929,6 +933,14 @@ function changeVoiceB() {
             );
         }
 
+		// =========================================================
+		// Clear Input
+		
+		function clearInput() {
+    		stopSpeaking();
+
+    		document.getElementById("textInput").value = "";
+		}
 
         // =========================================================
         // Speak Next
