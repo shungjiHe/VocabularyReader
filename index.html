@@ -149,6 +149,10 @@
         	盲聽模式
     	</label>
 
+    	<span id="readingProgress">
+        	第 0 / 0 句（剩餘 0 句）
+    	</span>
+
 	</div>
 
     <!-- ========================================================= -->
@@ -825,6 +829,56 @@ function changeVoiceB() {
         voices[index];
 }
 
+		// =========================================================
+		// Reading Progress
+
+		function updateReadingProgress() {
+
+    		const progress =
+        		document.getElementById(
+            		"readingProgress"
+        		);
+
+
+    		if (lines.length === 0) {
+
+        		progress.textContent =
+            		"第 0 / 0 句（剩餘 0 句）";
+
+        		return;
+    		}
+
+
+    		if (currentIndex >= lines.length) {
+
+        		progress.textContent =
+            		"第 " +
+            		lines.length +
+            		" / " +
+            		lines.length +
+            		" 句（剩餘 0 句）";
+
+        		return;
+    		}
+
+
+    		const currentNumber =
+        		currentIndex + 1;
+
+    		const remaining =
+        		lines.length -
+        		currentNumber;
+
+    		progress.textContent =
+        		"第 " +
+        		currentNumber +
+        		" / " +
+        		lines.length +
+        		" 句（剩餘 " +
+        		remaining +
+        		" 句）";
+		}
+
 
         // =========================================================
         // Load Voices
@@ -937,6 +991,8 @@ function changeVoiceB() {
 
 
             currentIndex = 0;
+
+			updateReadingProgress();
 
             isPaused = false;
             isSpeaking = true;
@@ -1289,6 +1345,7 @@ function changeVoiceB() {
                         currentIndex =
                             index;
 
+						updateReadingProgress();
 
                         if (isHighlightEnabled) {
 
@@ -1518,6 +1575,7 @@ function changeVoiceB() {
                         return;
                     }
 
+					updateReadingProgress();
 
                     if (isHighlightEnabled) {
 
@@ -2150,7 +2208,12 @@ function clearWeakList() {
 
             currentIndex = 0;
 
+			lines = [];
+    		lineSpeakers = [];
+
             clearHighlight();
+
+			updateReadingProgress();
         }
 
 
