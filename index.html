@@ -1892,12 +1892,7 @@ function renderWeakList() {
 
 
             let prefix =
-                item.mode === "dialog"
-                    ? "[" +
-                        (item.speaker || "?") +
-                        "] "
-                    : "[單字] ";
-
+				item.mode === "dialog"? "[" +(item.speaker || "?") +"] " : "";
 
             textSpan.textContent =
                 (index + 1) +
