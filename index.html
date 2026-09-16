@@ -452,15 +452,15 @@
 
                         <select id="ttsEngineSelect">
                             <option value="auto">自動</option>
-                            <option value="kokoro">Kokoro（本機）</option>
+                            <option value="piper">Piper（本機）</option>
                             <option value="browser">瀏覽器 TTS</option>
                         </select>
 
                         <button
                             type="button"
-                            id="loadKokoroBtn"
-                            onclick="manualLoadKokoro()">
-                            載入 Kokoro
+                            id="loadPiperBtn"
+                            onclick="manualLoadPiper()">
+                            載入 Piper
                         </button>
 
                         <span
@@ -472,9 +472,9 @@
                     </div>
 
                     <div class="engine-note">
-                        自動模式：iPhone / iPad 優先使用 Kokoro；其他裝置優先使用瀏覽器 TTS。
-                        Kokoro 不會在開頁面時自動下載；請按「載入 Kokoro」或直接按「開始朗讀」。
-                        iPhone / iPad 使用較小的 q8 + WASM 模型，下載完成後由瀏覽器快取。
+                        自動模式：優先使用 Piper；Piper 失敗時自動退回瀏覽器 TTS。
+                        Piper 使用單一 en_US-arctic-medium 模型，提供 2 男 2 女美式英文聲音。
+                        第一次使用需要下載模型與 WASM；之後會優先使用瀏覽器快取。
                     </div>
 
                 </div>
@@ -2976,80 +2976,131 @@ function clearWeakList() {
     </script>
 
     <!-- ========================================================= -->
-    <!-- Kokoro / Browser TTS Auto Engine -->
+    <!-- Piper / Browser TTS Auto Engine -->
 
-    <script>
+    <script type="module">
+
         // =========================================================
-        // Kokoro TTS Configuration
+        // Piper Configuration
+        //
+        // en_US-arctic-medium:
+        //   One model, multiple speakers.
+        //
+        // Selected native US English speakers:
+        //   BDL = male, US Midwest
+        //   RMS = male, US
+        //   SLT = female, US Midwest
+        //   CLB = female, US
 
-        const KOKORO_MODEL_ID =
-            "onnx-community/Kokoro-82M-v1.0-ONNX";
+        const PIPER_MODULE_URL =
+            "https://cdn.jsdelivr.net/npm/piper-tts-web@1.1.2/dist/piper-tts-web.js";
 
-        const KOKORO_MODULE_URL =
-            "https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/+esm";
+        const PIPER_ONNX_BASE =
+            "https://cdn.jsdelivr.net/npm/piper-tts-web@1.1.2/dist/onnx/";
 
-        let kokoroModulePromise = null;
-        let kokoroInitPromise = null;
-        let kokoroTts = null;
-        let kokoroDevice = null;
-        let kokoroInitFailed = false;
-        let kokoroLoading = false;
+        const PIPER_PHONEMIZE_BASE =
+            "https://cdn.jsdelivr.net/npm/piper-tts-web@1.1.2/dist/piper/";
 
-        let selectedKokoroVoiceA =
-            "am_michael";
+        const PIPER_VOICE_ID =
+            "en_US-arctic-medium";
 
-        let selectedKokoroVoiceB =
-            "af_heart";
+        const PIPER_CACHE_NAME =
+            "english-reader-piper-v1";
+
+
+        const PIPER_SPEAKERS = [
+            {
+                id: 7,
+                key: "bdl",
+                label: "Male 1 - BDL（US Midwest）",
+                gender: "male"
+            },
+            {
+                id: 1,
+                key: "rms",
+                label: "Male 2 - RMS（US）",
+                gender: "male"
+            },
+            {
+                id: 2,
+                key: "slt",
+                label: "Female 1 - SLT（US Midwest）",
+                gender: "female"
+            },
+            {
+                id: 4,
+                key: "clb",
+                label: "Female 2 - CLB（US）",
+                gender: "female"
+            }
+        ];
+
+
+        let selectedPiperVoiceA = 7;
+        let selectedPiperVoiceB = 2;
+
+        let piperModulePromise = null;
+        let piperInitPromise = null;
+        let piperEngine = null;
+        let piperBackend = null;
+        let piperInitFailed = false;
+        let piperLoading = false;
 
         /*
-            Session cache:
-            The first generation of a sentence is kept as a WAV Blob.
-            Repeating the same sentence does not run the model again.
+            Generated sentence cache.
+
+            Key:
+                speakerId | text
+
+            Playback speed is NOT part of the key.
+            Speed is adjusted by HTMLAudioElement.playbackRate,
+            so changing 0.9x -> 1.0x does not need a new inference.
         */
-        const kokoroAudioCache =
+        const piperAudioCache =
             new Map();
 
-        const kokoroPendingAudio =
+        const piperPendingAudio =
             new Map();
 
-        let kokoroAudioContext = null;
-        let currentKokoroSource = null;
-        let kokoroPlayToken = 0;
+        let piperAudioElement = null;
+        let piperAudioUrl = null;
+        let piperAudioUnlocked = false;
+        let piperPlayToken = 0;
 
 
         // =========================================================
-        // Keep Original Functions
+        // Keep Original Browser TTS Functions
 
         const browserUpdateVoiceDisplay =
-            updateVoiceDisplay;
+            window.updateVoiceDisplay;
 
         const browserChangeVoiceA =
-            changeVoiceA;
+            window.changeVoiceA;
 
         const browserChangeVoiceB =
-            changeVoiceB;
+            window.changeVoiceB;
 
         const originalStartSpeaking =
-            startSpeaking;
+            window.startSpeaking;
 
         const originalSpeakNext =
-            speakNext;
+            window.speakNext;
 
         const browserSpeakText =
-            speakText;
+            window.speakText;
 
         const browserTogglePause =
-            togglePause;
+            window.togglePause;
 
         const originalStopSpeaking =
-            stopSpeaking;
+            window.stopSpeaking;
 
         const originalMoveToLine =
-            moveToLine;
+            window.moveToLine;
 
 
         // =========================================================
-        // Platform / Engine Selection
+        // Platform / Engine
 
         function isIOSDevice() {
 
@@ -3061,12 +3112,10 @@ function clearWeakList() {
                     userAgent
                 );
 
-            /*
-                iPadOS can report itself as MacIntel.
-            */
             const desktopModeIPad =
                 navigator.platform === "MacIntel" &&
                 navigator.maxTouchPoints > 1;
+
 
             return (
                 normalIOS ||
@@ -3096,29 +3145,22 @@ function clearWeakList() {
             }
 
 
-            if (requested === "kokoro") {
+            if (requested === "piper") {
 
-                return kokoroInitFailed
+                return piperInitFailed
                     ? "browser"
-                    : "kokoro";
+                    : "piper";
             }
 
 
             /*
                 Auto:
-                iPhone / iPad -> Kokoro
-                Desktop      -> Browser TTS
-
-                Kokoro initialization failure -> Browser TTS fallback.
+                Piper first.
+                Browser SpeechSynthesis is the fallback.
             */
-            if (isIOSDevice() &&
-                !kokoroInitFailed) {
-
-                return "kokoro";
-            }
-
-
-            return "browser";
+            return piperInitFailed
+                ? "browser"
+                : "piper";
         }
 
 
@@ -3146,23 +3188,24 @@ function clearWeakList() {
 
 
             if (getEffectiveTtsEngine() ===
-                "kokoro") {
+                "piper") {
 
-                if (kokoroTts) {
+                if (piperEngine) {
 
                     status.textContent =
-                        "目前：Kokoro / " +
+                        "目前：Piper / " +
                         (
-                            kokoroDevice === "webgpu"
-                                ? "WebGPU / fp32"
-                                : "WASM / q8"
-                        );
+                            piperBackend === "webgpu"
+                                ? "WebGPU"
+                                : "WASM"
+                        ) +
+                        " / Arctic Medium";
 
                 }
                 else {
 
                     status.textContent =
-                        "Kokoro 尚未載入（按「載入 Kokoro」或「開始朗讀」）";
+                        "Piper 尚未載入（按「載入 Piper」或「開始朗讀」）";
                 }
 
             }
@@ -3175,325 +3218,487 @@ function clearWeakList() {
 
 
         // =========================================================
-        // Kokoro Initialization
+        // Persistent Fetch Cache
+        //
+        // Piper model is about 77 MB.
+        // Cache Storage is used when available so GitHub Pages
+        // does not need to fetch it again on every page load.
 
-        async function unlockKokoroAudio() {
+        class PiperCachedFetchProvider {
 
-            if (!kokoroAudioContext) {
+            constructor() {
 
-                const AudioContextClass =
-                    window.AudioContext ||
-                    window.webkitAudioContext;
+                this.memoryCache =
+                    new Map();
+            }
 
 
-                if (!AudioContextClass) {
+            destroy() {
 
-                    throw new Error(
-                        "Web Audio API is not supported."
+                for (const value of
+                    this.memoryCache.values()) {
+
+                    if (
+                        typeof value === "string" &&
+                        value.startsWith("blob:")
+                    ) {
+
+                        URL.revokeObjectURL(
+                            value
+                        );
+                    }
+                }
+
+
+                this.memoryCache.clear();
+            }
+
+
+            async fetch(
+                url) {
+
+                if (this.memoryCache.has(
+                        url
+                    )) {
+
+                    return this.memoryCache.get(
+                        url
                     );
                 }
 
 
-                kokoroAudioContext =
-                    new AudioContextClass();
+                let response = null;
+                let cache = null;
+
+
+                if (
+                    "caches" in window &&
+                    location.protocol === "https:"
+                ) {
+
+                    try {
+
+                        cache =
+                            await caches.open(
+                                PIPER_CACHE_NAME
+                            );
+
+
+                        response =
+                            await cache.match(
+                                url
+                            );
+
+                    }
+                    catch (error) {
+
+                        console.warn(
+                            "Piper cache open failed:",
+                            error
+                        );
+                    }
+                }
+
+
+                if (!response) {
+
+                    this.updateDownloadStatus(
+                        url
+                    );
+
+
+                    response =
+                        await fetch(
+                            url,
+                            {
+                                mode:
+                                    "cors"
+                            }
+                        );
+
+
+                    if (!response.ok) {
+
+                        throw new Error(
+                            "Piper fetch failed: " +
+                            response.status +
+                            " " +
+                            url
+                        );
+                    }
+
+
+                    if (cache) {
+
+                        try {
+
+                            await cache.put(
+                                url,
+                                response.clone()
+                            );
+
+                        }
+                        catch (error) {
+
+                            /*
+                                Storage quota may be smaller on some iPhones.
+                                Failing to cache must not stop TTS.
+                            */
+                            console.warn(
+                                "Piper persistent cache failed:",
+                                error
+                            );
+                        }
+                    }
+
+                }
+                else {
+
+                    if (
+                        url.endsWith(".onnx")
+                    ) {
+
+                        updateTtsStatus(
+                            "Piper：從瀏覽器快取載入模型..."
+                        );
+                    }
+                }
+
+
+                let result;
+
+
+                if (url.endsWith(".json")) {
+
+                    result =
+                        await response.json();
+
+                }
+                else {
+
+                    const blob =
+                        await response.blob();
+
+
+                    result =
+                        URL.createObjectURL(
+                            blob
+                        );
+                }
+
+
+                this.memoryCache.set(
+                    url,
+                    result
+                );
+
+
+                return result;
             }
 
 
-            if (kokoroAudioContext.state ===
-                "suspended") {
+            updateDownloadStatus(
+                url) {
 
-                await kokoroAudioContext
-                    .resume();
+                if (
+                    url.endsWith(".onnx")
+                ) {
+
+                    updateTtsStatus(
+                        "Piper：下載 Arctic Medium 模型（約 77 MB）..."
+                    );
+
+                    return;
+                }
+
+
+                if (
+                    url.endsWith(
+                        "piper_phonemize.data"
+                    )
+                ) {
+
+                    updateTtsStatus(
+                        "Piper：下載發音資料（約 18 MB）..."
+                    );
+
+                    return;
+                }
+
+
+                if (
+                    url.endsWith(".wasm")
+                ) {
+
+                    updateTtsStatus(
+                        "Piper：載入 WASM..."
+                    );
+
+                    return;
+                }
+
+
+                updateTtsStatus(
+                    "Piper：載入資源..."
+                );
             }
         }
 
 
-        async function loadKokoroModule() {
+        let piperFetchProvider = null;
 
-            if (!kokoroModulePromise) {
 
-                kokoroModulePromise =
+        // =========================================================
+        // Piper Module / Engine
+
+        async function loadPiperModule() {
+
+            if (!piperModulePromise) {
+
+                piperModulePromise =
                     import(
-                        KOKORO_MODULE_URL
+                        PIPER_MODULE_URL
                     );
             }
 
 
-            return kokoroModulePromise;
+            return piperModulePromise;
         }
 
 
-        function updateKokoroProgress(
-            progress) {
+        function buildPiperEngine(
+            module,
+            useWebGpu) {
 
-            if (!progress) {
-                return;
+            if (!piperFetchProvider) {
+
+                piperFetchProvider =
+                    new PiperCachedFetchProvider();
             }
 
 
-            const percent =
-                Number(
-                    progress.progress
-                );
+            const voiceProvider =
+                new module.HuggingFaceVoiceProvider({
+                    provider:
+                        piperFetchProvider
+                });
 
 
-            const fileName =
-                progress.file ||
-                progress.name ||
-                "模型";
+            const phonemizeRuntime =
+                new module.PhonemizeWebRuntime({
+                    provider:
+                        piperFetchProvider,
+
+                    basePath:
+                        PIPER_PHONEMIZE_BASE
+                });
 
 
-            if (Number.isFinite(percent)) {
+            let onnxRuntime;
 
-                updateTtsStatus(
-                    "Kokoro：下載 " +
-                    fileName +
-                    " " +
-                    Math.round(percent) +
-                    "%"
-                );
 
-                return;
+            if (
+                useWebGpu &&
+                module.OnnxWebGPURuntime
+            ) {
+
+                onnxRuntime =
+                    new module.OnnxWebGPURuntime({
+                        basePath:
+                            PIPER_ONNX_BASE,
+
+                        /*
+                            GitHub Pages does not provide the
+                            COOP/COEP headers needed for threaded WASM.
+
+                            One thread avoids SharedArrayBuffer problems.
+                        */
+                        numThreads:
+                            1
+                    });
+
+
+                piperBackend =
+                    "webgpu";
+
+            }
+            else {
+
+                onnxRuntime =
+                    new module.OnnxWebRuntime({
+                        basePath:
+                            PIPER_ONNX_BASE,
+
+                        numThreads:
+                            1
+                    });
+
+
+                piperBackend =
+                    "wasm";
             }
 
 
-            if (progress.status) {
+            return new module.PiperWebEngine({
+                onnxRuntime:
+                    onnxRuntime,
 
-                updateTtsStatus(
-                    "Kokoro：" +
-                    progress.status
-                );
-            }
+                phonemizeRuntime:
+                    phonemizeRuntime,
+
+                voiceProvider:
+                    voiceProvider
+            });
         }
 
 
-        async function manualLoadKokoro() {
+        async function initializePiperEngine(
+            module) {
 
-            const button =
-                document.getElementById(
-                    "loadKokoroBtn"
+            /*
+                Desktop:
+                try WebGPU first for lower inference latency.
+
+                iPhone / iPad:
+                use the simpler WASM path first.
+            */
+            const tryWebGpu =
+                !isIOSDevice() &&
+                !!navigator.gpu;
+
+
+            if (tryWebGpu) {
+
+                try {
+
+                    updateTtsStatus(
+                        "Piper：初始化 WebGPU..."
+                    );
+
+
+                    piperEngine =
+                        buildPiperEngine(
+                            module,
+                            true
+                        );
+
+
+                    /*
+                        Warm-up:
+                        Forces model download + ONNX session creation
+                        before real playback starts.
+                    */
+                    await piperEngine.generate(
+                        "Ready.",
+                        PIPER_VOICE_ID,
+                        selectedPiperVoiceA
+                    );
+
+
+                    return;
+                }
+                catch (error) {
+
+                    console.warn(
+                        "Piper WebGPU failed. Falling back to WASM.",
+                        error
+                    );
+
+
+                    try {
+
+                        piperEngine?.destroy();
+
+                    }
+                    catch (destroyError) {
+                        // Ignore.
+                    }
+
+
+                    piperEngine =
+                        null;
+                }
+            }
+
+
+            updateTtsStatus(
+                "Piper：初始化 WASM..."
+            );
+
+
+            piperEngine =
+                buildPiperEngine(
+                    module,
+                    false
                 );
 
 
-            if (kokoroTts) {
-
-                updateTtsStatus();
-
-                return;
-            }
-
-
-            if (kokoroLoading) {
-                return;
-            }
-
-
-            button.disabled =
-                true;
-
-            button.textContent =
-                "載入中...";
-
-
-            try {
-
-                kokoroInitFailed =
-                    false;
-
-
-                await ensureKokoroReady();
-
-            }
-            finally {
-
-                button.disabled =
-                    false;
-
-                button.textContent =
-                    kokoroTts
-                        ? "Kokoro 已載入"
-                        : "載入 Kokoro";
-            }
+            await piperEngine.generate(
+                "Ready.",
+                PIPER_VOICE_ID,
+                selectedPiperVoiceA
+            );
         }
 
 
-        async function ensureKokoroReady() {
+        async function ensurePiperReady() {
 
-            if (kokoroTts) {
+            if (piperEngine) {
                 return true;
             }
 
 
-            if (kokoroInitPromise) {
-                return kokoroInitPromise;
+            if (piperInitPromise) {
+                return piperInitPromise;
             }
 
 
-            kokoroInitFailed = false;
+            piperInitFailed =
+                false;
 
 
-            kokoroInitPromise =
+            piperInitPromise =
                 (async function () {
 
                     try {
 
+                        piperLoading =
+                            true;
+
+
                         updateTtsStatus(
-                            "Kokoro：載入程式庫..."
+                            "Piper：載入程式庫..."
                         );
 
 
                         const module =
-                            await loadKokoroModule();
-
-                        const KokoroTTS =
-                            module.KokoroTTS;
+                            await loadPiperModule();
 
 
-                        if (!KokoroTTS) {
-
-                            throw new Error(
-                                "KokoroTTS module not found."
-                            );
-                        }
+                        await initializePiperEngine(
+                            module
+                        );
 
 
-                        kokoroLoading =
-                            true;
-
-
-                        /*
-                            iPhone / iPad:
-                            直接使用 q8 + WASM。
-
-                            原因：WebGPU + fp32 模型約 325 MB，
-                            對行動網路與 Safari 記憶體都太重。
-                            q8 模型約 90 MB，較適合手機實測。
-                        */
-                        if (isIOSDevice()) {
-
-                            updateTtsStatus(
-                                "Kokoro：載入手機版模型（q8 / WASM）..."
-                            );
-
-
-                            kokoroTts =
-                                await KokoroTTS
-                                    .from_pretrained(
-                                        KOKORO_MODEL_ID,
-                                        {
-                                            dtype:
-                                                "q8",
-
-                                            device:
-                                                "wasm",
-
-                                            progress_callback:
-                                                updateKokoroProgress
-                                        }
-                                    );
-
-
-                            kokoroDevice =
-                                "wasm";
-                        }
-                        else {
-
-                            /*
-                                Desktop:
-                                WebGPU 優先，失敗再退回 WASM + q8。
-                            */
-                            if (navigator.gpu) {
-
-                                try {
-
-                                    updateTtsStatus(
-                                        "Kokoro：載入模型（WebGPU）..."
-                                    );
-
-
-                                    kokoroTts =
-                                        await KokoroTTS
-                                            .from_pretrained(
-                                                KOKORO_MODEL_ID,
-                                                {
-                                                    dtype:
-                                                        "fp32",
-
-                                                    device:
-                                                        "webgpu",
-
-                                                    progress_callback:
-                                                        updateKokoroProgress
-                                                }
-                                            );
-
-
-                                    kokoroDevice =
-                                        "webgpu";
-
-                                }
-                                catch (webGpuError) {
-
-                                    console.warn(
-                                        "Kokoro WebGPU failed; falling back to WASM.",
-                                        webGpuError
-                                    );
-
-
-                                    kokoroTts =
-                                        null;
-                                }
-                            }
-
-
-                            if (!kokoroTts) {
-
-                                updateTtsStatus(
-                                    "Kokoro：載入模型（WASM）..."
-                                );
-
-
-                                kokoroTts =
-                                    await KokoroTTS
-                                        .from_pretrained(
-                                            KOKORO_MODEL_ID,
-                                            {
-                                                dtype:
-                                                    "q8",
-
-                                                device:
-                                                    "wasm",
-
-                                                progress_callback:
-                                                    updateKokoroProgress
-                                            }
-                                        );
-
-
-                                kokoroDevice =
-                                    "wasm";
-                            }
-                        }
-
-
-                        kokoroLoading =
+                        piperLoading =
                             false;
 
 
-                        populateKokoroVoiceDisplay();
+                        populatePiperVoiceDisplay();
 
                         updateTtsStatus();
 
 
-                        const loadButton =
+                        const button =
                             document.getElementById(
-                                "loadKokoroBtn"
+                                "loadPiperBtn"
                             );
 
-                        if (loadButton) {
 
-                            loadButton.textContent =
-                                "Kokoro 已載入";
+                        if (button) {
+
+                            button.textContent =
+                                "Piper 已載入";
                         }
 
 
@@ -3503,44 +3708,106 @@ function clearWeakList() {
                     catch (error) {
 
                         console.error(
-                            "Kokoro initialization failed:",
+                            "Piper initialization failed:",
                             error
                         );
 
 
-                        kokoroTts = null;
-                        kokoroDevice = null;
-                        kokoroInitFailed = true;
-                        kokoroLoading = false;
+                        piperEngine =
+                            null;
+
+                        piperBackend =
+                            null;
+
+                        piperInitFailed =
+                            true;
+
+                        piperLoading =
+                            false;
 
 
                         updateTtsStatus(
-                            "Kokoro 載入失敗，已改用瀏覽器 TTS"
+                            "Piper 載入失敗，已改用瀏覽器 TTS"
                         );
 
 
                         loadVoices();
-                        updateVoiceDisplay();
+
+                        browserUpdateVoiceDisplay();
+
 
                         return false;
 
                     }
                     finally {
 
-                        kokoroInitPromise =
+                        piperInitPromise =
                             null;
                     }
                 })();
 
 
-            return kokoroInitPromise;
+            return piperInitPromise;
         }
+
+
+        window.manualLoadPiper =
+            async function () {
+
+                const button =
+                    document.getElementById(
+                        "loadPiperBtn"
+                    );
+
+
+                if (piperEngine) {
+
+                    updateTtsStatus();
+
+                    return;
+                }
+
+
+                if (piperLoading) {
+                    return;
+                }
+
+
+                button.disabled =
+                    true;
+
+                button.textContent =
+                    "載入中...";
+
+
+                try {
+
+                    piperInitFailed =
+                        false;
+
+
+                    await unlockPiperAudio();
+
+                    await ensurePiperReady();
+
+                }
+                finally {
+
+                    button.disabled =
+                        false;
+
+                    button.textContent =
+                        piperEngine
+                            ? "Piper 已載入"
+                            : "載入 Piper";
+                }
+            };
 
 
         // =========================================================
         // Voice UI
 
-        function showKokoroVoicePlaceholder() {
+        function showPiperVoicePlaceholder() {
 
             const voiceASelect =
                 document.getElementById(
@@ -3553,8 +3820,11 @@ function clearWeakList() {
                 );
 
 
-            voiceASelect.innerHTML = "";
-            voiceBSelect.innerHTML = "";
+            voiceASelect.innerHTML =
+                "";
+
+            voiceBSelect.innerHTML =
+                "";
 
 
             const optionA =
@@ -3563,10 +3833,10 @@ function clearWeakList() {
                 );
 
             optionA.value =
-                selectedKokoroVoiceA;
+                selectedPiperVoiceA;
 
             optionA.textContent =
-                "請先載入 Kokoro";
+                "請先載入 Piper";
 
 
             const optionB =
@@ -3575,10 +3845,10 @@ function clearWeakList() {
                 );
 
             optionB.value =
-                selectedKokoroVoiceB;
+                selectedPiperVoiceB;
 
             optionB.textContent =
-                "請先載入 Kokoro";
+                "請先載入 Piper";
 
 
             voiceASelect.appendChild(
@@ -3591,15 +3861,7 @@ function clearWeakList() {
         }
 
 
-        function populateKokoroVoiceDisplay() {
-
-            if (!kokoroTts) {
-
-                showKokoroVoicePlaceholder();
-
-                return;
-            }
-
+        function populatePiperVoiceDisplay() {
 
             const voiceASelect =
                 document.getElementById(
@@ -3612,133 +3874,80 @@ function clearWeakList() {
                 );
 
 
-            voiceASelect.innerHTML = "";
-            voiceBSelect.innerHTML = "";
+            voiceASelect.innerHTML =
+                "";
+
+            voiceBSelect.innerHTML =
+                "";
 
 
-            const allVoices =
-                Object.entries(
-                    kokoroTts.voices ||
-                    {}
-                );
+            PIPER_SPEAKERS.forEach(
+                function (
+                    speaker) {
 
-
-            const maleVoices =
-                allVoices.filter(
-                    ([id]) =>
-                        id.startsWith(
-                            "am_"
-                        )
-                );
-
-            const femaleVoices =
-                allVoices.filter(
-                    ([id]) =>
-                        id.startsWith(
-                            "af_"
-                        )
-                );
-
-
-            function addOptions(
-                select,
-                entries) {
-
-                entries.forEach(
-                    function (
-                        [id, info]) {
-
-                        const option =
-                            document.createElement(
-                                "option"
-                            );
-
-
-                        option.value =
-                            id;
-
-                        option.textContent =
-                            (info?.name || id) +
-                            " (" +
-                            id +
-                            ")";
-
-
-                        select.appendChild(
-                            option
+                    const optionA =
+                        document.createElement(
+                            "option"
                         );
-                    }
+
+                    optionA.value =
+                        speaker.id;
+
+                    optionA.textContent =
+                        speaker.label;
+
+
+                    const optionB =
+                        document.createElement(
+                            "option"
+                        );
+
+                    optionB.value =
+                        speaker.id;
+
+                    optionB.textContent =
+                        speaker.label;
+
+
+                    voiceASelect.appendChild(
+                        optionA
+                    );
+
+                    voiceBSelect.appendChild(
+                        optionB
+                    );
+                }
+            );
+
+
+            voiceASelect.value =
+                String(
+                    selectedPiperVoiceA
                 );
-            }
 
-
-            addOptions(
-                voiceASelect,
-                maleVoices
-            );
-
-            addOptions(
-                voiceBSelect,
-                femaleVoices
-            );
-
-
-            if (maleVoices.some(
-                    ([id]) =>
-                        id ===
-                        selectedKokoroVoiceA
-                )) {
-
-                voiceASelect.value =
-                    selectedKokoroVoiceA;
-
-            }
-            else if (maleVoices.length > 0) {
-
-                selectedKokoroVoiceA =
-                    maleVoices[0][0];
-
-                voiceASelect.value =
-                    selectedKokoroVoiceA;
-            }
-
-
-            if (femaleVoices.some(
-                    ([id]) =>
-                        id ===
-                        selectedKokoroVoiceB
-                )) {
-
-                voiceBSelect.value =
-                    selectedKokoroVoiceB;
-
-            }
-            else if (femaleVoices.length > 0) {
-
-                selectedKokoroVoiceB =
-                    femaleVoices[0][0];
-
-                voiceBSelect.value =
-                    selectedKokoroVoiceB;
-            }
+            voiceBSelect.value =
+                String(
+                    selectedPiperVoiceB
+                );
         }
 
 
-        updateVoiceDisplay =
+        window.updateVoiceDisplay =
             function () {
 
                 if (getEffectiveTtsEngine() ===
-                    "kokoro") {
+                    "piper") {
 
-                    if (kokoroTts) {
+                    if (piperEngine) {
 
-                        populateKokoroVoiceDisplay();
+                        populatePiperVoiceDisplay();
 
                     }
                     else {
 
-                        showKokoroVoicePlaceholder();
+                        showPiperVoicePlaceholder();
                     }
+
 
                     return;
                 }
@@ -3748,18 +3957,22 @@ function clearWeakList() {
             };
 
 
-        changeVoiceA =
+        window.changeVoiceA =
             function () {
 
                 if (getEffectiveTtsEngine() ===
-                    "kokoro") {
+                    "piper") {
 
-                    selectedKokoroVoiceA =
-                        document
-                            .getElementById(
-                                "voiceASelect"
-                            )
-                            .value;
+                    selectedPiperVoiceA =
+                        parseInt(
+                            document
+                                .getElementById(
+                                    "voiceASelect"
+                                )
+                                .value,
+                            10
+                        );
+
 
                     return;
                 }
@@ -3769,18 +3982,22 @@ function clearWeakList() {
             };
 
 
-        changeVoiceB =
+        window.changeVoiceB =
             function () {
 
                 if (getEffectiveTtsEngine() ===
-                    "kokoro") {
+                    "piper") {
 
-                    selectedKokoroVoiceB =
-                        document
-                            .getElementById(
-                                "voiceBSelect"
-                            )
-                            .value;
+                    selectedPiperVoiceB =
+                        parseInt(
+                            document
+                                .getElementById(
+                                    "voiceBSelect"
+                                )
+                                .value,
+                            10
+                        );
+
 
                     return;
                 }
@@ -3790,52 +4007,265 @@ function clearWeakList() {
             };
 
 
-        // =========================================================
-        // Kokoro Audio Generation / Playback
+        function getPiperSpeakerId(
+            speakerRole) {
 
-        function getKokoroCacheKey(
+            return speakerRole === "B"
+                ? selectedPiperVoiceB
+                : selectedPiperVoiceA;
+        }
+
+
+        // =========================================================
+        // Audio Unlock
+        //
+        // Use the same HTMLAudioElement for the entire session.
+        // The silent playback is triggered directly by the user's click
+        // so later Piper-generated WAV can play on iPhone Safari.
+
+        function getPiperAudioElement() {
+
+            if (!piperAudioElement) {
+
+                piperAudioElement =
+                    new Audio();
+
+
+                piperAudioElement.preload =
+                    "auto";
+
+                piperAudioElement.playsInline =
+                    true;
+            }
+
+
+            return piperAudioElement;
+        }
+
+
+        function createSilentWavBlob() {
+
+            const sampleRate =
+                8000;
+
+            const sampleCount =
+                160;
+
+            const dataSize =
+                sampleCount * 2;
+
+            const buffer =
+                new ArrayBuffer(
+                    44 + dataSize
+                );
+
+            const view =
+                new DataView(
+                    buffer
+                );
+
+
+            function writeString(
+                offset,
+                text) {
+
+                for (
+                    let i = 0;
+                    i < text.length;
+                    i++
+                ) {
+
+                    view.setUint8(
+                        offset + i,
+                        text.charCodeAt(i)
+                    );
+                }
+            }
+
+
+            writeString(
+                0,
+                "RIFF"
+            );
+
+            view.setUint32(
+                4,
+                36 + dataSize,
+                true
+            );
+
+            writeString(
+                8,
+                "WAVE"
+            );
+
+            writeString(
+                12,
+                "fmt "
+            );
+
+            view.setUint32(
+                16,
+                16,
+                true
+            );
+
+            view.setUint16(
+                20,
+                1,
+                true
+            );
+
+            view.setUint16(
+                22,
+                1,
+                true
+            );
+
+            view.setUint32(
+                24,
+                sampleRate,
+                true
+            );
+
+            view.setUint32(
+                28,
+                sampleRate * 2,
+                true
+            );
+
+            view.setUint16(
+                32,
+                2,
+                true
+            );
+
+            view.setUint16(
+                34,
+                16,
+                true
+            );
+
+            writeString(
+                36,
+                "data"
+            );
+
+            view.setUint32(
+                40,
+                dataSize,
+                true
+            );
+
+
+            return new Blob(
+                [
+                    buffer
+                ],
+                {
+                    type:
+                        "audio/wav"
+                }
+            );
+        }
+
+
+        async function unlockPiperAudio() {
+
+            if (piperAudioUnlocked) {
+                return;
+            }
+
+
+            const audio =
+                getPiperAudioElement();
+
+            const silentUrl =
+                URL.createObjectURL(
+                    createSilentWavBlob()
+                );
+
+
+            const oldVolume =
+                audio.volume;
+
+
+            try {
+
+                audio.volume =
+                    0;
+
+                audio.src =
+                    silentUrl;
+
+
+                await audio.play();
+
+
+                audio.pause();
+
+                audio.currentTime =
+                    0;
+
+
+                piperAudioUnlocked =
+                    true;
+
+            }
+            finally {
+
+                audio.volume =
+                    oldVolume;
+
+
+                URL.revokeObjectURL(
+                    silentUrl
+                );
+            }
+        }
+
+
+        // =========================================================
+        // Piper Generation Cache
+
+        function getPiperCacheKey(
             text,
-            voice,
-            rate) {
+            speakerId) {
 
             return (
-                voice +
-                "|" +
-                rate.toFixed(1) +
+                speakerId +
                 "|" +
                 text
             );
         }
 
 
-        async function getKokoroAudioBlob(
+        async function getPiperAudioBlob(
             text,
-            voice,
-            rate) {
+            speakerId) {
 
             const key =
-                getKokoroCacheKey(
+                getPiperCacheKey(
                     text,
-                    voice,
-                    rate
+                    speakerId
                 );
 
 
-            if (kokoroAudioCache.has(
+            if (piperAudioCache.has(
                     key
                 )) {
 
-                return kokoroAudioCache.get(
+                return piperAudioCache.get(
                     key
                 );
             }
 
 
-            if (kokoroPendingAudio.has(
+            if (piperPendingAudio.has(
                     key
                 )) {
 
-                return kokoroPendingAudio.get(
+                return piperPendingAudio.get(
                     key
                 );
             }
@@ -3844,24 +4274,41 @@ function clearWeakList() {
             const promise =
                 (async function () {
 
-                    const rawAudio =
-                        await kokoroTts.generate(
-                            text,
-                            {
-                                voice:
-                                    voice,
+                    const startTime =
+                        performance.now();
 
-                                speed:
-                                    rate
-                            }
+
+                    const response =
+                        await piperEngine.generate(
+                            text,
+                            PIPER_VOICE_ID,
+                            speakerId
                         );
 
 
+                    const elapsed =
+                        (
+                            (
+                                performance.now() -
+                                startTime
+                            ) /
+                            1000
+                        ).toFixed(2);
+
+
+                    console.log(
+                        "Piper generated:",
+                        text,
+                        "speaker=" + speakerId,
+                        elapsed + " sec"
+                    );
+
+
                     const blob =
-                        rawAudio.toBlob();
+                        response.file;
 
 
-                    kokoroAudioCache.set(
+                    piperAudioCache.set(
                         key,
                         blob
                     );
@@ -3871,7 +4318,7 @@ function clearWeakList() {
                 })();
 
 
-            kokoroPendingAudio.set(
+            piperPendingAudio.set(
                 key,
                 promise
             );
@@ -3884,92 +4331,179 @@ function clearWeakList() {
             }
             finally {
 
-                kokoroPendingAudio.delete(
+                piperPendingAudio.delete(
                     key
                 );
             }
         }
 
 
-        function stopKokoroPlayback() {
+        // =========================================================
+        // Prefetch
+        //
+        // Generate the next sentence while the current sentence is playing.
+        // This is the main latency reduction compared with the old
+        // generate -> play -> generate -> play sequence.
 
-            kokoroPlayToken++;
+        function prefetchNextPiperLine() {
+
+            const nextIndex =
+                currentIndex + 1;
 
 
-            if (!currentKokoroSource) {
+            if (
+                nextIndex < 0 ||
+                nextIndex >= lines.length ||
+                !piperEngine
+            ) {
+
                 return;
             }
 
 
-            try {
+            const mode =
+                document
+                    .getElementById(
+                        "modeSelect"
+                    )
+                    .value;
 
-                currentKokoroSource.onended =
-                    null;
 
-                currentKokoroSource.stop();
+            const speakerRole =
+                mode === "dialog"
+                    ? (
+                        lineSpeakers[nextIndex] ||
+                        (
+                            nextIndex % 2 === 0
+                                ? "A"
+                                : "B"
+                        )
+                    )
+                    : "A";
 
+
+            const speakerId =
+                getPiperSpeakerId(
+                    speakerRole
+                );
+
+
+            getPiperAudioBlob(
+                lines[nextIndex],
+                speakerId
+            )
+            .catch(
+                function (
+                    error) {
+
+                    console.warn(
+                        "Piper prefetch failed:",
+                        error
+                    );
+                }
+            );
+        }
+
+
+        // =========================================================
+        // Piper Playback
+
+        function revokeCurrentPiperAudioUrl() {
+
+            if (!piperAudioUrl) {
+                return;
             }
-            catch (error) {
-                // Source may already have ended.
-            }
 
 
-            currentKokoroSource =
+            URL.revokeObjectURL(
+                piperAudioUrl
+            );
+
+
+            piperAudioUrl =
                 null;
         }
 
 
-        async function speakTextWithKokoro(
+        function stopPiperPlayback() {
+
+            piperPlayToken++;
+
+
+            if (!piperAudioElement) {
+                return;
+            }
+
+
+            piperAudioElement.onended =
+                null;
+
+            piperAudioElement.onerror =
+                null;
+
+
+            try {
+
+                piperAudioElement.pause();
+
+                piperAudioElement.currentTime =
+                    0;
+
+            }
+            catch (error) {
+                // Ignore.
+            }
+
+
+            revokeCurrentPiperAudioUrl();
+        }
+
+
+        async function speakTextWithPiper(
             text,
             sessionId,
             speaker,
             callback) {
 
-            if (sessionId !== speechSessionId ||
+            if (
+                sessionId !== speechSessionId ||
                 !isSpeaking ||
-                isPaused) {
+                isPaused
+            ) {
 
                 return;
             }
 
 
             const playToken =
-                ++kokoroPlayToken;
+                ++piperPlayToken;
 
-
-            const voice =
-                speaker === "B"
-                    ? selectedKokoroVoiceB
-                    : selectedKokoroVoiceA;
-
-
-            const rate =
-                parseFloat(
-                    document.getElementById(
-                        "rateSelect"
-                    ).value
+            const speakerId =
+                getPiperSpeakerId(
+                    speaker || "A"
                 );
 
 
             try {
 
                 updateTtsStatus(
-                    "Kokoro：產生語音..."
+                    "Piper：產生語音..."
                 );
 
 
                 const blob =
-                    await getKokoroAudioBlob(
+                    await getPiperAudioBlob(
                         text,
-                        voice,
-                        rate
+                        speakerId
                     );
 
 
-                if (playToken !== kokoroPlayToken ||
+                if (
+                    playToken !== piperPlayToken ||
                     sessionId !== speechSessionId ||
                     !isSpeaking ||
-                    isPaused) {
+                    isPaused
+                ) {
 
                     updateTtsStatus();
 
@@ -3977,55 +4511,56 @@ function clearWeakList() {
                 }
 
 
-                await unlockKokoroAudio();
+                const audio =
+                    getPiperAudioElement();
 
 
-                const arrayBuffer =
-                    await blob.arrayBuffer();
-
-                const audioBuffer =
-                    await kokoroAudioContext
-                        .decodeAudioData(
-                            arrayBuffer.slice(0)
-                        );
+                revokeCurrentPiperAudioUrl();
 
 
-                if (playToken !== kokoroPlayToken ||
-                    sessionId !== speechSessionId ||
-                    !isSpeaking ||
-                    isPaused) {
-
-                    updateTtsStatus();
-
-                    return;
-                }
+                piperAudioUrl =
+                    URL.createObjectURL(
+                        blob
+                    );
 
 
-                stopKokoroPlayback();
+                audio.src =
+                    piperAudioUrl;
+
+
+                const rate =
+                    parseFloat(
+                        document
+                            .getElementById(
+                                "rateSelect"
+                            )
+                            .value
+                    );
+
+
+                audio.playbackRate =
+                    rate;
+
 
                 /*
-                    stopKokoroPlayback() increments the token,
-                    so this playback receives a fresh token.
+                    Preserve voice pitch while changing speed.
                 */
-                const activeToken =
-                    ++kokoroPlayToken;
+                if (
+                    "preservesPitch" in audio
+                ) {
+
+                    audio.preservesPitch =
+                        true;
+                }
 
 
-                const source =
-                    kokoroAudioContext
-                        .createBufferSource();
+                if (
+                    "webkitPreservesPitch" in audio
+                ) {
 
-
-                source.buffer =
-                    audioBuffer;
-
-                source.connect(
-                    kokoroAudioContext.destination
-                );
-
-
-                currentKokoroSource =
-                    source;
+                    audio.webkitPreservesPitch =
+                        true;
+                }
 
 
                 updateReadingProgress();
@@ -4048,24 +4583,31 @@ function clearWeakList() {
                 updateTtsStatus();
 
 
-                source.onended =
+                const activeToken =
+                    playToken;
+
+
+                audio.onended =
                     function () {
 
-                        if (activeToken !==
-                            kokoroPlayToken) {
+                        if (
+                            activeToken !==
+                            piperPlayToken
+                        ) {
 
                             return;
                         }
 
 
-                        currentKokoroSource =
-                            null;
+                        revokeCurrentPiperAudioUrl();
 
 
-                        if (sessionId !==
-                            speechSessionId ||
+                        if (
+                            sessionId !==
+                                speechSessionId ||
                             !isSpeaking ||
-                            isPaused) {
+                            isPaused
+                        ) {
 
                             return;
                         }
@@ -4077,28 +4619,56 @@ function clearWeakList() {
                     };
 
 
-                source.start(0);
+                audio.onerror =
+                    function () {
+
+                        if (
+                            activeToken !==
+                            piperPlayToken
+                        ) {
+
+                            return;
+                        }
+
+
+                        console.error(
+                            "Piper audio playback failed."
+                        );
+                    };
+
+
+                /*
+                    Generate the next line while this one is speaking.
+                */
+                prefetchNextPiperLine();
+
+
+                await audio.play();
 
             }
             catch (error) {
 
                 console.error(
-                    "Kokoro speech failed:",
+                    "Piper speech failed:",
                     error
                 );
 
 
-                kokoroInitFailed =
+                piperInitFailed =
                     true;
 
 
                 updateTtsStatus(
-                    "Kokoro 失敗，已改用瀏覽器 TTS"
+                    "Piper 失敗，已改用瀏覽器 TTS"
                 );
 
 
+                stopPiperPlayback();
+
+
                 loadVoices();
-                updateVoiceDisplay();
+
+                browserUpdateVoiceDisplay();
 
 
                 const browserVoice =
@@ -4124,7 +4694,7 @@ function clearWeakList() {
         // =========================================================
         // Override Common Speech Function
 
-        speakText =
+        window.speakText =
             function (
                 text,
                 voice,
@@ -4132,16 +4702,19 @@ function clearWeakList() {
                 speaker,
                 callback) {
 
-                if (getEffectiveTtsEngine() ===
-                    "kokoro" &&
-                    kokoroTts) {
+                if (
+                    getEffectiveTtsEngine() ===
+                        "piper" &&
+                    piperEngine
+                ) {
 
-                    speakTextWithKokoro(
+                    speakTextWithPiper(
                         text,
                         sessionId,
                         speaker,
                         callback
                     );
+
 
                     return;
                 }
@@ -4160,83 +4733,178 @@ function clearWeakList() {
         // =========================================================
         // Start Speaking
 
-        startSpeaking =
+        window.startSpeaking =
             async function () {
 
-                if (getEffectiveTtsEngine() ===
-                    "kokoro") {
+                if (
+                    getEffectiveTtsEngine() !==
+                    "piper"
+                ) {
 
-                    try {
+                    originalStartSpeaking();
 
-                        /*
-                            Run this directly from the Start button click
-                            so iPhone Safari authorizes audio output.
-                        */
-                        await unlockKokoroAudio();
-
-                    }
-                    catch (error) {
-
-                        console.warn(
-                            "Unable to unlock Web Audio:",
-                            error
-                        );
-                    }
-
-
-                    const ready =
-                        await ensureKokoroReady();
-
-
-                    if (!ready) {
-
-                        /*
-                            ensureKokoroReady() already switched
-                            effective engine to Browser TTS.
-                        */
-                        updateVoiceDisplay();
-                    }
+                    return;
                 }
 
 
-                originalStartSpeaking();
+                /*
+                    iPhone Safari:
+                    authorize the Audio element immediately from this click,
+                    before model loading / inference starts.
+                */
+                try {
+
+                    await unlockPiperAudio();
+
+                }
+                catch (error) {
+
+                    console.warn(
+                        "Unable to unlock Piper audio:",
+                        error
+                    );
+                }
+
+
+                const ready =
+                    await ensurePiperReady();
+
+
+                if (!ready) {
+
+                    originalStartSpeaking();
+
+                    return;
+                }
+
+
+                const mode =
+                    document
+                        .getElementById(
+                            "modeSelect"
+                        )
+                        .value;
+
+
+                const activeItems =
+                    getActiveItems();
+
+
+                if (activeItems.length === 0) {
+
+                    const weakOnly =
+                        document
+                            .getElementById(
+                                "weakOnlyMode"
+                            )
+                            .checked;
+
+
+                    alert(
+                        weakOnly
+                            ? "目前沒有弱項。"
+                            : "請輸入文字！"
+                    );
+
+
+                    return;
+                }
+
+
+                /*
+                    Stop Browser TTS and the previous Piper playback.
+                */
+                synth.cancel();
+
+                stopPiperPlayback();
+
+
+                speechSessionId++;
+
+
+                const currentSessionId =
+                    speechSessionId;
+
+
+                lines =
+                    activeItems.map(
+                        item =>
+                            item.text
+                    );
+
+
+                lineSpeakers =
+                    activeItems.map(
+                        item =>
+                            item.speaker
+                    );
+
+
+                currentIndex =
+                    0;
+
+
+                updateReadingProgress();
+
+
+                isPaused =
+                    false;
+
+                isSpeaking =
+                    true;
+
+
+                window.speakNext(
+                    currentSessionId
+                );
             };
 
 
         // =========================================================
         // Dialog Playback
+        //
+        // Browser TTS can queue SpeechSynthesisUtterance objects.
+        // Piper cannot use that queue, so dialog mode is always
+        // played one line at a time.
 
-        speakNext =
+        window.speakNext =
             function (
                 sessionId) {
 
-                /*
-                    The original dialog mode uses the browser's
-                    speechSynthesis queue when delay = 0.
+                if (
+                    getEffectiveTtsEngine() ===
+                        "piper" &&
+                    piperEngine &&
+                    document
+                        .getElementById(
+                            "modeSelect"
+                        )
+                        .value === "dialog"
+                ) {
 
-                    Kokoro cannot use that queue, so run it line-by-line.
-                */
-                if (getEffectiveTtsEngine() ===
-                    "kokoro" &&
-                    kokoroTts &&
-                    document.getElementById(
-                        "modeSelect"
-                    ).value === "dialog") {
-
-                    if (sessionId !== speechSessionId ||
+                    if (
+                        sessionId !== speechSessionId ||
                         !isSpeaking ||
-                        isPaused) {
+                        isPaused
+                    ) {
 
                         return;
                     }
 
 
-                    if (currentIndex >= lines.length) {
+                    if (
+                        currentIndex >=
+                        lines.length
+                    ) {
 
-                        isSpeaking = false;
+                        isSpeaking =
+                            false;
+
 
                         clearHighlight();
+
                         updateReadingProgress();
+
 
                         return;
                     }
@@ -4245,6 +4913,7 @@ function clearWeakList() {
                     speakDialogLine(
                         sessionId
                     );
+
 
                     return;
                 }
@@ -4259,12 +4928,14 @@ function clearWeakList() {
         // =========================================================
         // Pause / Resume
 
-        togglePause =
+        window.togglePause =
             async function () {
 
-                if (getEffectiveTtsEngine() !==
-                    "kokoro" ||
-                    !kokoroTts) {
+                if (
+                    getEffectiveTtsEngine() !==
+                        "piper" ||
+                    !piperEngine
+                ) {
 
                     browserTogglePause();
 
@@ -4277,29 +4948,47 @@ function clearWeakList() {
                 }
 
 
+                const audio =
+                    getPiperAudioElement();
+
+
                 if (isPaused) {
 
                     isPaused =
                         false;
 
 
-                    if (currentKokoroSource &&
-                        kokoroAudioContext &&
-                        kokoroAudioContext.state ===
-                            "suspended") {
+                    /*
+                        If audio was paused during actual playback,
+                        continue it.
 
-                        await kokoroAudioContext
-                            .resume();
+                        If pause happened while Piper was generating,
+                        start the current line again. The pending/cache
+                        map avoids unnecessary duplicate inference.
+                    */
+                    if (
+                        audio.src &&
+                        audio.paused &&
+                        audio.currentTime > 0
+                    ) {
+
+                        try {
+
+                            await audio.play();
+
+                        }
+                        catch (error) {
+
+                            console.error(
+                                "Piper resume failed:",
+                                error
+                            );
+                        }
 
                     }
                     else {
 
-                        /*
-                            If pause happened while the model was generating,
-                            restart the current line. The pending/cache map
-                            prevents unnecessary duplicate inference.
-                        */
-                        speakNext(
+                        window.speakNext(
                             speechSessionId
                         );
                     }
@@ -4311,20 +5000,22 @@ function clearWeakList() {
                         true;
 
 
-                    if (currentKokoroSource &&
-                        kokoroAudioContext) {
+                    if (
+                        !audio.paused &&
+                        audio.src
+                    ) {
 
-                        await kokoroAudioContext
-                            .suspend();
+                        audio.pause();
 
                     }
                     else {
 
                         /*
+                            Generation is still pending.
                             Cancel only the pending playback request.
-                            Model inference may finish and enter cache.
+                            The generated WAV can still enter cache.
                         */
-                        kokoroPlayToken++;
+                        piperPlayToken++;
                     }
                 }
             };
@@ -4333,22 +5024,10 @@ function clearWeakList() {
         // =========================================================
         // Stop / Previous / Next
 
-        stopSpeaking =
+        window.stopSpeaking =
             function () {
 
-                stopKokoroPlayback();
-
-
-                if (kokoroAudioContext &&
-                    kokoroAudioContext.state ===
-                        "suspended") {
-
-                    kokoroAudioContext
-                        .resume()
-                        .catch(
-                            () => {}
-                        );
-                }
+                stopPiperPlayback();
 
 
                 originalStopSpeaking();
@@ -4357,19 +5036,18 @@ function clearWeakList() {
             };
 
 
-        moveToLine =
+        window.moveToLine =
             function (
                 offset) {
 
-                stopKokoroPlayback();
+                stopPiperPlayback();
+
 
                 originalMoveToLine(
                     offset
                 );
 
-                /*
-                    Update immediately when Previous / Next is pressed.
-                */
+
                 updateReadingProgress();
             };
 
@@ -4385,33 +5063,33 @@ function clearWeakList() {
                 "change",
                 function () {
 
-                    stopSpeaking();
+                    window.stopSpeaking();
 
-                    kokoroInitFailed =
+
+                    piperInitFailed =
                         false;
 
 
-                    if (getEffectiveTtsEngine() ===
-                        "kokoro") {
+                    if (
+                        getEffectiveTtsEngine() ===
+                        "piper"
+                    ) {
 
-                        /*
-                            Do not download the large model immediately.
-                            It is initialized on the first Start click.
-                        */
-                        if (kokoroTts) {
+                        if (piperEngine) {
 
-                            populateKokoroVoiceDisplay();
+                            populatePiperVoiceDisplay();
 
                         }
                         else {
 
-                            showKokoroVoicePlaceholder();
+                            showPiperVoicePlaceholder();
                         }
 
                     }
                     else {
 
                         loadVoices();
+
                         browserUpdateVoiceDisplay();
                     }
 
@@ -4422,15 +5100,17 @@ function clearWeakList() {
 
 
         // =========================================================
-        // Initial Engine UI
+        // Initial Piper UI
 
         updateTtsStatus();
 
 
-        if (getEffectiveTtsEngine() ===
-            "kokoro") {
+        if (
+            getEffectiveTtsEngine() ===
+            "piper"
+        ) {
 
-            showKokoroVoicePlaceholder();
+            showPiperVoicePlaceholder();
 
         }
         else {
