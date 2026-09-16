@@ -456,6 +456,13 @@
                             <option value="browser">瀏覽器 TTS</option>
                         </select>
 
+                        <button
+                            type="button"
+                            id="loadKokoroBtn"
+                            onclick="manualLoadKokoro()">
+                            載入 Kokoro
+                        </button>
+
                         <span
                             id="ttsStatus"
                             class="engine-status">
@@ -466,7 +473,8 @@
 
                     <div class="engine-note">
                         自動模式：iPhone / iPad 優先使用 Kokoro；其他裝置優先使用瀏覽器 TTS。
-                        Kokoro 第一次使用需要下載模型，之後由瀏覽器快取。
+                        Kokoro 不會在開頁面時自動下載；請按「載入 Kokoro」或直接按「開始朗讀」。
+                        iPhone / iPad 使用較小的 q8 + WASM 模型，下載完成後由瀏覽器快取。
                     </div>
 
                 </div>
@@ -2985,6 +2993,7 @@ function clearWeakList() {
         let kokoroTts = null;
         let kokoroDevice = null;
         let kokoroInitFailed = false;
+        let kokoroLoading = false;
 
         let selectedKokoroVoiceA =
             "am_michael";
@@ -3145,15 +3154,15 @@ function clearWeakList() {
                         "目前：Kokoro / " +
                         (
                             kokoroDevice === "webgpu"
-                                ? "WebGPU"
-                                : "WASM"
+                                ? "WebGPU / fp32"
+                                : "WASM / q8"
                         );
 
                 }
                 else {
 
                     status.textContent =
-                        "目前：Kokoro（首次朗讀時載入）";
+                        "Kokoro 尚未載入（按「載入 Kokoro」或「開始朗讀」）";
                 }
 
             }
@@ -3214,6 +3223,100 @@ function clearWeakList() {
         }
 
 
+        function updateKokoroProgress(
+            progress) {
+
+            if (!progress) {
+                return;
+            }
+
+
+            const percent =
+                Number(
+                    progress.progress
+                );
+
+
+            const fileName =
+                progress.file ||
+                progress.name ||
+                "模型";
+
+
+            if (Number.isFinite(percent)) {
+
+                updateTtsStatus(
+                    "Kokoro：下載 " +
+                    fileName +
+                    " " +
+                    Math.round(percent) +
+                    "%"
+                );
+
+                return;
+            }
+
+
+            if (progress.status) {
+
+                updateTtsStatus(
+                    "Kokoro：" +
+                    progress.status
+                );
+            }
+        }
+
+
+        async function manualLoadKokoro() {
+
+            const button =
+                document.getElementById(
+                    "loadKokoroBtn"
+                );
+
+
+            if (kokoroTts) {
+
+                updateTtsStatus();
+
+                return;
+            }
+
+
+            if (kokoroLoading) {
+                return;
+            }
+
+
+            button.disabled =
+                true;
+
+            button.textContent =
+                "載入中...";
+
+
+            try {
+
+                kokoroInitFailed =
+                    false;
+
+
+                await ensureKokoroReady();
+
+            }
+            finally {
+
+                button.disabled =
+                    false;
+
+                button.textContent =
+                    kokoroTts
+                        ? "Kokoro 已載入"
+                        : "載入 Kokoro";
+            }
+        }
+
+
         async function ensureKokoroReady() {
 
             if (kokoroTts) {
@@ -3254,55 +3357,22 @@ function clearWeakList() {
                         }
 
 
+                        kokoroLoading =
+                            true;
+
+
                         /*
-                            Prefer WebGPU.
-                            If it fails, retry with WASM + q8.
+                            iPhone / iPad:
+                            直接使用 q8 + WASM。
+
+                            原因：WebGPU + fp32 模型約 325 MB，
+                            對行動網路與 Safari 記憶體都太重。
+                            q8 模型約 90 MB，較適合手機實測。
                         */
-                        if (navigator.gpu) {
-
-                            try {
-
-                                updateTtsStatus(
-                                    "Kokoro：載入模型（WebGPU）..."
-                                );
-
-
-                                kokoroTts =
-                                    await KokoroTTS
-                                        .from_pretrained(
-                                            KOKORO_MODEL_ID,
-                                            {
-                                                dtype:
-                                                    "fp32",
-
-                                                device:
-                                                    "webgpu"
-                                            }
-                                        );
-
-
-                                kokoroDevice =
-                                    "webgpu";
-
-                            }
-                            catch (webGpuError) {
-
-                                console.warn(
-                                    "Kokoro WebGPU failed; falling back to WASM.",
-                                    webGpuError
-                                );
-
-
-                                kokoroTts =
-                                    null;
-                            }
-                        }
-
-
-                        if (!kokoroTts) {
+                        if (isIOSDevice()) {
 
                             updateTtsStatus(
-                                "Kokoro：載入模型（WASM）..."
+                                "Kokoro：載入手機版模型（q8 / WASM）..."
                             );
 
 
@@ -3315,7 +3385,10 @@ function clearWeakList() {
                                                 "q8",
 
                                             device:
-                                                "wasm"
+                                                "wasm",
+
+                                            progress_callback:
+                                                updateKokoroProgress
                                         }
                                     );
 
@@ -3323,11 +3396,106 @@ function clearWeakList() {
                             kokoroDevice =
                                 "wasm";
                         }
+                        else {
+
+                            /*
+                                Desktop:
+                                WebGPU 優先，失敗再退回 WASM + q8。
+                            */
+                            if (navigator.gpu) {
+
+                                try {
+
+                                    updateTtsStatus(
+                                        "Kokoro：載入模型（WebGPU）..."
+                                    );
+
+
+                                    kokoroTts =
+                                        await KokoroTTS
+                                            .from_pretrained(
+                                                KOKORO_MODEL_ID,
+                                                {
+                                                    dtype:
+                                                        "fp32",
+
+                                                    device:
+                                                        "webgpu",
+
+                                                    progress_callback:
+                                                        updateKokoroProgress
+                                                }
+                                            );
+
+
+                                    kokoroDevice =
+                                        "webgpu";
+
+                                }
+                                catch (webGpuError) {
+
+                                    console.warn(
+                                        "Kokoro WebGPU failed; falling back to WASM.",
+                                        webGpuError
+                                    );
+
+
+                                    kokoroTts =
+                                        null;
+                                }
+                            }
+
+
+                            if (!kokoroTts) {
+
+                                updateTtsStatus(
+                                    "Kokoro：載入模型（WASM）..."
+                                );
+
+
+                                kokoroTts =
+                                    await KokoroTTS
+                                        .from_pretrained(
+                                            KOKORO_MODEL_ID,
+                                            {
+                                                dtype:
+                                                    "q8",
+
+                                                device:
+                                                    "wasm",
+
+                                                progress_callback:
+                                                    updateKokoroProgress
+                                            }
+                                        );
+
+
+                                kokoroDevice =
+                                    "wasm";
+                            }
+                        }
+
+
+                        kokoroLoading =
+                            false;
 
 
                         populateKokoroVoiceDisplay();
 
                         updateTtsStatus();
+
+
+                        const loadButton =
+                            document.getElementById(
+                                "loadKokoroBtn"
+                            );
+
+                        if (loadButton) {
+
+                            loadButton.textContent =
+                                "Kokoro 已載入";
+                        }
+
 
                         return true;
 
@@ -3343,6 +3511,7 @@ function clearWeakList() {
                         kokoroTts = null;
                         kokoroDevice = null;
                         kokoroInitFailed = true;
+                        kokoroLoading = false;
 
 
                         updateTtsStatus(
@@ -3397,7 +3566,7 @@ function clearWeakList() {
                 selectedKokoroVoiceA;
 
             optionA.textContent =
-                "Kokoro 尚未載入";
+                "請先載入 Kokoro";
 
 
             const optionB =
@@ -3409,7 +3578,7 @@ function clearWeakList() {
                 selectedKokoroVoiceB;
 
             optionB.textContent =
-                "Kokoro 尚未載入";
+                "請先載入 Kokoro";
 
 
             voiceASelect.appendChild(
