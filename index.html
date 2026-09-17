@@ -610,6 +610,10 @@
                     下一句
                 </button>
 
+                <button onclick="practiceCurrentChunk()">
+                    Chunk 練習
+                </button>
+
                 <button
                     id="shuffleButton"
                     onclick="shuffleWords()">
@@ -2635,6 +2639,323 @@ function clearWeakList() {
 		}
 		
 		
+
+        // =========================================================
+        // Chunk Practice
+
+        function practiceCurrentChunk() {
+
+            const activeItems =
+                getActiveItems();
+
+
+            if (activeItems.length === 0) {
+
+                alert(
+                    "目前沒有可練習的句子。"
+                );
+
+                return;
+            }
+
+
+            let targetIndex =
+                currentIndex;
+
+
+            if (targetIndex < 0 ||
+                targetIndex >= activeItems.length) {
+
+                targetIndex = 0;
+            }
+
+
+            const text =
+                activeItems[targetIndex].text;
+
+
+            const item =
+                sentenceBankData.find(
+                    item =>
+                        item &&
+                        typeof item.sentence === "string" &&
+                        item.sentence
+                            .trim()
+                            .toLowerCase() ===
+                            text
+                                .trim()
+                                .toLowerCase()
+                );
+
+
+            if (!item ||
+                typeof item.chunk !== "string" ||
+                !item.chunk.trim()) {
+
+                alert(
+                    "這句目前沒有 Chunk 資料。"
+                );
+
+                return;
+            }
+
+
+            const chunks =
+                item.chunk
+                    .split("/")
+                    .map(
+                        chunk =>
+                            chunk.trim()
+                    )
+                    .filter(
+                        chunk =>
+                            chunk.length > 0
+                    );
+
+
+            if (chunks.length < 2) {
+
+                alert(
+                    "這句目前沒有可拆分的 Chunk。"
+                );
+
+                return;
+            }
+
+
+            const mode =
+                document.getElementById(
+                    "modeSelect"
+                ).value;
+
+
+            const speaker =
+                mode === "dialog"
+                    ? (
+                        activeItems[targetIndex].speaker ||
+                        (
+                            targetIndex % 2 === 0
+                                ? "A"
+                                : "B"
+                        )
+                    )
+                    : null;
+
+
+            const voice =
+                speaker === "B"
+                    ? selectedVoiceB
+                    : selectedVoiceA;
+
+
+            synth.cancel();
+
+            speechSessionId++;
+
+            const sessionId =
+                speechSessionId;
+
+
+            currentIndex =
+                targetIndex;
+
+            isPaused =
+                false;
+
+            isSpeaking =
+                false;
+
+
+            updateReadingProgress();
+
+
+            if (isHighlightEnabled) {
+
+                highlightCurrentText(
+                    text,
+                    speaker
+                );
+            }
+
+
+            speakChunkSequence(
+                chunks,
+                0,
+                voice,
+                sessionId,
+                function () {
+
+                    setTimeout(
+                        function () {
+
+                            if (sessionId !== speechSessionId) {
+                                return;
+                            }
+
+
+                            speakChunkText(
+                                text,
+                                voice,
+                                sessionId,
+                                function () {
+
+                                    if (sessionId !== speechSessionId) {
+                                        return;
+                                    }
+
+
+                                    if (isHighlightEnabled) {
+
+                                        highlightCurrentText(
+                                            text,
+                                            speaker
+                                        );
+                                    }
+                                }
+                            );
+
+                        },
+                        700
+                    );
+                }
+            );
+        }
+
+
+        function speakChunkSequence(
+            chunks,
+            index,
+            voice,
+            sessionId,
+            callback) {
+
+            if (sessionId !== speechSessionId) {
+                return;
+            }
+
+
+            if (index >= chunks.length) {
+
+                callback();
+
+                return;
+            }
+
+
+            speakChunkText(
+                chunks[index],
+                voice,
+                sessionId,
+                function () {
+
+                    if (sessionId !== speechSessionId) {
+                        return;
+                    }
+
+
+                    if (index >= chunks.length - 1) {
+
+                        callback();
+
+                        return;
+                    }
+
+
+                    setTimeout(
+                        function () {
+
+                            speakChunkSequence(
+                                chunks,
+                                index + 1,
+                                voice,
+                                sessionId,
+                                callback
+                            );
+
+                        },
+                        400
+                    );
+                }
+            );
+        }
+
+
+        function speakChunkText(
+            text,
+            voice,
+            sessionId,
+            callback) {
+
+            if (sessionId !== speechSessionId) {
+                return;
+            }
+
+
+            const utterance =
+                new SpeechSynthesisUtterance(
+                    text
+                );
+
+
+            utterance.voice =
+                voice;
+
+            utterance.lang =
+                voice && voice.lang
+                    ? voice.lang
+                    : "en-US";
+
+            utterance.pitch =
+                1.0;
+
+            utterance.rate =
+                parseFloat(
+                    document.getElementById(
+                        "rateSelect"
+                    ).value
+                );
+
+            utterance.volume =
+                1.0;
+
+
+            utterance.onend =
+                function () {
+
+                    if (sessionId !== speechSessionId) {
+                        return;
+                    }
+
+
+                    if (callback) {
+                        callback();
+                    }
+                };
+
+
+            utterance.onerror =
+                function (event) {
+
+                    if (event.error === "interrupted" ||
+                        event.error === "canceled") {
+
+                        return;
+                    }
+
+
+                    console.error(
+                        "Chunk speech error:",
+                        event.error
+                    );
+                };
+
+
+            synth.speak(
+                utterance
+            );
+        }
+
+
 		// =========================================================
         // Pause / Resume
 
