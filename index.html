@@ -288,6 +288,25 @@
             text-align: left;
         }
 
+        .current-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+
+        .current-card-header .card-title {
+            margin: 0;
+        }
+
+        .show-meaning-control {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            white-space: nowrap;
+        }
+
         .current-display {
             min-height: 58px;
             display: flex;
@@ -666,9 +685,20 @@
 
         <section class="card current-card">
 
-            <h2 class="card-title">
-                目前朗讀
-            </h2>
+            <div class="current-card-header">
+
+                <h2 class="card-title">
+                    目前朗讀
+                </h2>
+
+                <label class="show-meaning-control">
+                    <input
+                        type="checkbox"
+                        id="showMeaning">
+                    <span>顯示中文</span>
+                </label>
+
+            </div>
 
             <div class="current-display">
                 <p id="currentWordDisplay"></p>
@@ -730,7 +760,10 @@
                     "textInput"
                 );
 
-			textInput.value = "句子載入中...";
+
+            textInput.value =
+                "句子載入中...";
+
 
             try {
 
@@ -2823,10 +2856,57 @@ function clearWeakList() {
             }
 
 
+            if (document.getElementById("showMeaning").checked) {
+
+                const meaning =
+                    getSentenceMeaning(
+                        text
+                    );
+
+
+                if (meaning) {
+
+                    displayText +=
+                        "<br>" +
+                        escapeHtml(
+                            meaning
+                        );
+                }
+            }
+
+
             display.innerHTML =
                 '<span class="highlight">' +
                 displayText +
                 "</span>";
+        }
+
+
+        function getSentenceMeaning(
+            text) {
+
+            const target =
+                String(text || "")
+                    .trim()
+                    .toLowerCase();
+
+
+            const item =
+                sentenceBankData.find(
+                    item =>
+                        item &&
+                        typeof item.sentence === "string" &&
+                        item.sentence
+                            .trim()
+                            .toLowerCase() ===
+                            target
+                );
+
+
+            return item &&
+                   typeof item.meaning === "string"
+                ? item.meaning.trim()
+                : "";
         }
 
 
@@ -2883,6 +2963,48 @@ function clearWeakList() {
 		);
 		
 		// =========================================================
+        // Show Chinese Meaning
+
+        document
+            .getElementById("showMeaning")
+            .addEventListener(
+                "change",
+                function () {
+
+                    if (!isHighlightEnabled ||
+                        currentIndex < 0 ||
+                        currentIndex >= lines.length) {
+
+                        return;
+                    }
+
+
+                    const mode =
+                        document.getElementById(
+                            "modeSelect"
+                        ).value;
+
+                    const speaker =
+                        mode === "dialog"
+                            ? (
+                                lineSpeakers[currentIndex] ||
+                                (
+                                    currentIndex % 2 === 0
+                                        ? "A"
+                                        : "B"
+                                )
+                            )
+                            : null;
+
+
+                    highlightCurrentText(
+                        lines[currentIndex],
+                        speaker
+                    );
+                }
+            );
+
+
         // Blind Listening Mode
 
 		document
