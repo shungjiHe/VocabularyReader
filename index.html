@@ -1492,9 +1492,26 @@ function changeVoiceB() {
 		// Clear Input
 		
 		function clearInput() {
+
+            const confirmed =
+                confirm(
+                    "確定要清除全部句子嗎？"
+                );
+
+
+            if (!confirmed) {
+                return;
+            }
+
+
     		stopSpeaking();
 
     		document.getElementById("textInput").value = "";
+
+
+            alert(
+                "已清除句子"
+            );
 		}
 
         // =========================================================
@@ -2811,6 +2828,33 @@ function clearWeakList() {
                                             speaker
                                         );
                                     }
+
+
+                                    lines =
+                                        activeItems.map(
+                                            item =>
+                                                item.text
+                                        );
+
+
+                                    lineSpeakers =
+                                        activeItems.map(
+                                            item =>
+                                                item.speaker
+                                        );
+
+
+                                    currentIndex =
+                                        targetIndex;
+
+                                    isSpeaking =
+                                        true;
+
+                                    isPaused =
+                                        true;
+
+
+                                    updateReadingProgress();
                                 }
                             );
 
@@ -3069,6 +3113,17 @@ function clearWeakList() {
             }
 
 
+            const confirmed =
+                confirm(
+                    "確定要隨機排序全部句子嗎？"
+                );
+
+
+            if (!confirmed) {
+                return;
+            }
+
+
             const tempLines =
                 text
                     .split(/\r?\n/)
@@ -3118,6 +3173,11 @@ function clearWeakList() {
                 tempLines.join(
                     "\n"
                 );
+
+
+            alert(
+                "已隨機排序"
+            );
         }
 
 
