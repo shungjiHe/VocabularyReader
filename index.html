@@ -678,7 +678,6 @@
 
     </div>
 
-    <script src="./sentence_bank.js"></script>
     <script>
 
         // =========================================================
@@ -716,15 +715,93 @@
 
 		
 		// =========================================================
-		// Load Sentence Bank
+		// Load Sentence Bank From Google Apps Script
 
-		function loadSentenceBank() {
+        const SENTENCE_BANK_URL =
+            "https://script.google.com/macros/s/AKfycbxt-h145L31sJF2qypTGofYjAQs0nTmXahz6NuIJ3YQvQj6wMT675akirlz4-jIzy6d/exec";
 
-    		if (!Array.isArray(sentenceBank)) {
-        		return;
-    		}
+        let sentenceBankData = [];
 
-    		document.getElementById("textInput").value =sentenceBank.join("\n");
+
+		async function loadSentenceBank() {
+
+            const textInput =
+                document.getElementById(
+                    "textInput"
+                );
+
+
+            try {
+
+                const response =
+                    await fetch(
+                        SENTENCE_BANK_URL,
+                        {
+                            method: "GET",
+                            cache: "no-store"
+                        }
+                    );
+
+
+                if (!response.ok) {
+
+                    throw new Error(
+                        "HTTP " +
+                        response.status
+                    );
+                }
+
+
+                const data =
+                    await response.json();
+
+
+                if (!Array.isArray(data)) {
+
+                    throw new Error(
+                        "Sentence Bank JSON format is invalid."
+                    );
+                }
+
+
+                sentenceBankData =
+                    data.filter(
+                        item =>
+                            item &&
+                            typeof item.sentence === "string" &&
+                            item.sentence.trim().length > 0
+                    );
+
+
+                textInput.value =
+                    sentenceBankData
+                        .map(
+                            item =>
+                                item.sentence.trim()
+                        )
+                        .join(
+                            "\n"
+                        );
+
+
+                console.log(
+                    "Sentence Bank loaded:",
+                    sentenceBankData.length
+                );
+
+            }
+            catch (error) {
+
+                console.error(
+                    "Load Sentence Bank failed:",
+                    error
+                );
+
+                textInput.value = "";
+
+                textInput.placeholder =
+                    "Sentence Bank 載入失敗，可先手動輸入句子...";
+            }
 		}
 		
 		
@@ -823,7 +900,7 @@
 
 
             // -----------------------------------------------------
-            // A - Male
+            // A Voice
 
             const maleNames = [
                 // Microsoft / Windows
@@ -845,7 +922,7 @@
 
 
             // -----------------------------------------------------
-            // B - Female
+            // B Voice
 
             const femaleNames = [
                 "Jenny",
@@ -920,7 +997,7 @@
 
 
             console.log(
-                "Available en-US voices:",
+                "Available English voices:",
                 voices
             );
 
@@ -1317,7 +1394,7 @@ function changeVoiceB() {
             if (!selectedVoiceA) {
 
                 alert(
-                    "找不到適合的英文男性 Voice。"
+                    "找不到適合的 A 聲音。"
                 );
 
                 return;
@@ -1328,7 +1405,7 @@ function changeVoiceB() {
                 !selectedVoiceB) {
 
                 alert(
-                    "找不到適合的英文女性 Voice。"
+                    "找不到適合的 B 聲音。"
                 );
 
                 return;
@@ -1689,7 +1766,9 @@ function changeVoiceB() {
                     voice;
 
                 utterance.lang =
-                    "en-US";
+                    voice && voice.lang
+                        ? voice.lang
+                        : "en-US";
 
                 utterance.pitch =
                     1.0;
@@ -1904,10 +1983,13 @@ function changeVoiceB() {
 
 
             /*
-                強制美式英文。
+                使用目前 Voice 自己的語系。
+                例如 Samantha = en-US，Daniel = en-GB。
             */
             utterance.lang =
-                "en-US";
+                voice && voice.lang
+                    ? voice.lang
+                    : "en-US";
 
 
             /*
