@@ -380,7 +380,7 @@
                 <label for="modeSelect">模式：</label>
 
                 <select id="modeSelect">
-                    <option value="word">單字模式</option>
+                    <option value="word">單字/句子模式</option>
                     <option value="dialog">對話模式</option>
                 </select>
             </div>
@@ -429,7 +429,7 @@
                             <label
                                 class="setting-label"
                                 for="repeatCount">
-                                每個單字朗讀次數
+                                每個單字/句子朗讀次數
                             </label>
 
                             <input
@@ -446,7 +446,7 @@
                             <label
                                 class="setting-label"
                                 for="wordDelay">
-                                單字朗讀間隔
+                                單字/句子朗讀間隔
                             </label>
 
                             <input
@@ -2708,7 +2708,7 @@ function clearWeakList() {
             if (!text) {
 
                 alert(
-                    "請先輸入單字！"
+                    "請先輸入單字/句子！"
                 );
 
                 return;
