@@ -1,4 +1,4 @@
-const CACHE_LIMIT = 8;
+const CACHE_LIMIT = 2;
 const PIPER_DEFAULT_VOICE = 'en_US-lessac-medium';
 const PIPER_VOICES = [
   { id: 'en_US-lessac-medium', label: 'US English · Lessac medium' },
