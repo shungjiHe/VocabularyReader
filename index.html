@@ -211,7 +211,18 @@
             width: 100%;
         }
 
-        .control-group {
+        
+        .tts-status {
+            margin-top: 12px;
+            padding: 10px 12px;
+            border: 1px solid #e1e5ea;
+            border-radius: 6px;
+            color: #555;
+            font-size: 14px;
+            background-color: #fafbfc;
+        }
+
+.control-group {
             display: flex;
             flex-wrap: wrap;
             justify-content: center;
@@ -573,6 +584,12 @@
 
                 </div>
 
+                <div
+                    id="piperStatus"
+                    class="tts-status">
+                    Piper：第一次播放會初始化音訊並下載所選語音模型。
+                </div>
+
             </div>
 
         </section>
@@ -712,18 +729,29 @@
 
     </div>
 
-    <script>
+    <script type="module">
+
+        import {
+            PiperTtsEngine,
+            PIPER_VOICES,
+            isPiperAudioBlocked
+        } from "./src/piper-tts-engine.js";
 
         // =========================================================
         // Global Variables
 
-        const synth =
-            window.speechSynthesis;
+        const piperTts =
+            new PiperTtsEngine({
+                onStatus: updatePiperStatus
+            });
 
         let voices = [];
 
-        let selectedVoiceA = null;
-        let selectedVoiceB = null;
+        let selectedVoiceA =
+            "en_US-hfc_female-medium";
+
+        let selectedVoiceB =
+            "en_GB-alan-medium";
 
         let lines = [];
 
@@ -872,447 +900,155 @@
 
     		weakItems = [];
 		}
-
-
         // =========================================================
-        // Voice
+        // Piper TTS
 
-        function loadVoices() {
+        function updatePiperStatus(info) {
 
-            const allVoices =
-                synth.getVoices();
+            const status =
+                document.getElementById("piperStatus");
 
-            /*
-                主要保留美式英文（en-US），
-                另外保留英式英文 Daniel（en-GB）。
-
-                某些瀏覽器可能回傳大小寫略有不同，
-                所以統一轉小寫比較。
-            */
-            voices =
-                allVoices.filter(
-                    voice => {
-
-                        if (!voice.lang) {
-                            return false;
-                        }
-
-
-                        const lang =
-                            voice.lang.toLowerCase();
-
-
-                        const isUsEnglish =
-                            lang.startsWith(
-                                "en-us"
-                            );
-
-
-                        const isBritishDaniel =
-                            lang.startsWith(
-                                "en-gb"
-                            ) &&
-                            containsIgnoreCase(
-                                voice.name,
-                                "Daniel"
-                            );
-
-
-                        return (
-                            isUsEnglish ||
-                            isBritishDaniel
-                        );
-                    }
-                );
-
-
-            if (voices.length === 0) {
-
-                selectedVoiceA = null;
-                selectedVoiceB = null;
-
-                updateVoiceDisplay();
-
+            if (!status || !info) {
                 return;
             }
 
+            let text =
+                "Piper：" +
+                (info.label || info.key || "");
 
-            // -----------------------------------------------------
-            // A Voice
-
-            const maleNames = [
-                // Microsoft / Windows
-				"Guy",
-                "Andrew",
-                "Brian",
-                "Davis",
-                "Christopher",
-                "Eric",
-                "Jason",
-                "Roger",
-                "Tony",
-				
-				// Apple / iPhone / Safari
-				"Aaron",
-				"Fred",
-				"Alex"
-            ];
-
-
-            // -----------------------------------------------------
-            // B Voice
-
-            const femaleNames = [
-                "Jenny",
-                "Aria",
-                "Ava",
-                "Emma",
-                "Michelle",
-                "Sara",
-                "Nancy",
-                "Jane",
-				
-				// Apple / iPhone / Safari
-				"Samantha",
-				"Nicky",
-				"Victoria"
-            ];
-
-
-            selectedVoiceA =
-                voices.find(
-                    voice =>
-                        voice.lang &&
-                        voice.lang.toLowerCase().startsWith(
-                            "en-us"
-                        ) &&
-                        containsIgnoreCase(
-                            voice.name,
-                            "Samantha"
-                        )
-                ) ||
-                findBestNaturalVoice(
-                    voices,
-                    maleNames
-                );
-
-
-            selectedVoiceB =
-                voices.find(
-                    voice =>
-                        voice.lang &&
-                        voice.lang.toLowerCase().startsWith(
-                            "en-gb"
-                        ) &&
-                        containsIgnoreCase(
-                            voice.name,
-                            "Daniel"
-                        )
-                ) ||
-                findBestNaturalVoice(
-                    voices,
-                    femaleNames
-                );
-
-
-            if (!selectedVoiceA) {
-
-                selectedVoiceA =
-                    voices[0];
+            if (info.detail) {
+                text += "｜" + info.detail;
             }
 
+            if (Number.isFinite(info.progress)) {
+                text += "｜" + info.progress + "%";
+            }
 
-            if (!selectedVoiceB) {
+            status.textContent = text;
+        }
+
+
+        async function ensurePiperReady() {
+
+            if (!piperTts.isAudioReady()) {
+                await piperTts.enableAudio();
+            }
+
+            if (!piperTts.isReady()) {
+                await piperTts.init();
+            }
+        }
+
+
+        function handlePiperError(error) {
+
+            console.error(
+                "Piper TTS error:",
+                error
+            );
+
+            if (isPiperAudioBlocked(error)) {
+                alert(
+                    "瀏覽器尚未允許 Piper 音訊，請再按一次播放按鈕。"
+                );
+                return;
+            }
+
+            alert(
+                "Piper TTS 發生錯誤：" +
+                (error?.message || "Unknown error")
+            );
+        }
+
+
+        function loadVoices() {
+
+            voices =
+                PIPER_VOICES.map(
+                    voice => ({
+                        name: voice.id,
+                        label: voice.label
+                    })
+                );
+
+            if (!voices.some(
+                    voice =>
+                        voice.name === selectedVoiceA)) {
+
+                selectedVoiceA =
+                    voices[0]?.name || null;
+            }
+
+            if (!voices.some(
+                    voice =>
+                        voice.name === selectedVoiceB)) {
 
                 selectedVoiceB =
                     voices.find(
                         voice =>
-                            voice !== selectedVoiceA
-                    ) || voices[0];
+                            voice.name !== selectedVoiceA
+                    )?.name ||
+                    voices[0]?.name ||
+                    null;
             }
-				
+
             updateVoiceDisplay();
-
-
-            console.log(
-                "Available English voices:",
-                voices
-            );
-
-            console.log(
-                "A Dialog Voice:",
-                selectedVoiceA?.name
-            );
-
-            console.log(
-                "B Dialog Voice:",
-                selectedVoiceB?.name
-            );
         }
 
 
-        // =========================================================
-        // Find Best Voice
+        function updateVoiceDisplay() {
 
-        function findBestNaturalVoice(
-            voiceList,
-            preferredNames) {
+            const voiceASelect =
+                document.getElementById("voiceASelect");
 
-            // -----------------------------------------------------
-            // Priority 1
-            // Online + Natural + Preferred Person
+            const voiceBSelect =
+                document.getElementById("voiceBSelect");
 
-            for (const personName of preferredNames) {
+            voiceASelect.innerHTML = "";
+            voiceBSelect.innerHTML = "";
 
-                const voice =
-                    voiceList.find(
-                        v =>
-                            containsIgnoreCase(
-                                v.name,
-                                personName
-                            ) &&
-                            containsIgnoreCase(
-                                v.name,
-                                "Natural"
-                            ) &&
-                            containsIgnoreCase(
-                                v.name,
-                                "Online"
-                            )
-                    );
+            voices.forEach(
+                function (voice) {
 
-                if (voice) {
-                    return voice;
+                    const optionA =
+                        document.createElement("option");
+
+                    optionA.value = voice.name;
+                    optionA.textContent = voice.label;
+                    voiceASelect.appendChild(optionA);
+
+                    const optionB =
+                        document.createElement("option");
+
+                    optionB.value = voice.name;
+                    optionB.textContent = voice.label;
+                    voiceBSelect.appendChild(optionB);
                 }
+            );
+
+            if (selectedVoiceA) {
+                voiceASelect.value = selectedVoiceA;
             }
 
-
-            // -----------------------------------------------------
-            // Priority 2
-            // Natural + Preferred Person
-
-            for (const personName of preferredNames) {
-
-                const voice =
-                    voiceList.find(
-                        v =>
-                            containsIgnoreCase(
-                                v.name,
-                                personName
-                            ) &&
-                            containsIgnoreCase(
-                                v.name,
-                                "Natural"
-                            )
-                    );
-
-                if (voice) {
-                    return voice;
-                }
+            if (selectedVoiceB) {
+                voiceBSelect.value = selectedVoiceB;
             }
-
-
-            // -----------------------------------------------------
-            // Priority 3
-            // Preferred Person
-
-            for (const personName of preferredNames) {
-
-                const voice =
-                    voiceList.find(
-                        v =>
-                            containsIgnoreCase(
-                                v.name,
-                                personName
-                            )
-                    );
-
-                if (voice) {
-                    return voice;
-                }
-            }
-
-            return null;
         }
 
 
-        // =========================================================
-        // Case-insensitive Contains
-
-        function containsIgnoreCase(
-            source,
-            target) {
-
-            if (!source || !target) {
-                return false;
-            }
-
-            return source
-                .toLowerCase()
-                .includes(
-                    target.toLowerCase()
-                );
+        function changeVoiceA() {
+            selectedVoiceA =
+                document.getElementById("voiceASelect").value;
         }
 
 
-        // =========================================================
-        // Voice Display
-function updateVoiceDisplay() {
-
-    const voiceASelect =
-        document.getElementById(
-            "voiceASelect"
-        );
-
-    const voiceBSelect =
-        document.getElementById(
-            "voiceBSelect"
-        );
-
-
-    voiceASelect.innerHTML = "";
-    voiceBSelect.innerHTML = "";
-
-
-    if (voices.length === 0) {
-
-        const optionA =
-            document.createElement(
-                "option"
-            );
-
-        optionA.textContent =
-            "找不到美式英文 Voice";
-
-        voiceASelect.appendChild(
-            optionA
-        );
-
-
-        const optionB =
-            document.createElement(
-                "option"
-            );
-
-        optionB.textContent =
-            "找不到美式英文 Voice";
-
-        voiceBSelect.appendChild(
-            optionB
-        );
-
-        return;
-    }
-
-
-    voices.forEach(
-        function (
-            voice,
-            index) {
-
-            const optionA =
-                document.createElement(
-                    "option"
-                );
-
-            optionA.value =
-                index;
-
-            optionA.textContent =
-                voice.name;
-
-            voiceASelect.appendChild(
-                optionA
-            );
-
-
-            const optionB =
-                document.createElement(
-                    "option"
-                );
-
-            optionB.value =
-                index;
-
-            optionB.textContent =
-                voice.name;
-
-            voiceBSelect.appendChild(
-                optionB
-            );
+        function changeVoiceB() {
+            selectedVoiceB =
+                document.getElementById("voiceBSelect").value;
         }
-    );
 
 
-    const voiceAIndex =
-        voices.indexOf(
-            selectedVoiceA
-        );
 
-    const voiceBIndex =
-        voices.indexOf(
-            selectedVoiceB
-        );
-
-
-    if (voiceAIndex >= 0) {
-
-        voiceASelect.value =
-            voiceAIndex;
-    }
-
-
-    if (voiceBIndex >= 0) {
-
-        voiceBSelect.value =
-            voiceBIndex;
-    }
-}
-
-		function changeVoiceA() {
-
-    const index =
-        parseInt(
-            document.getElementById(
-                "voiceASelect"
-            ).value,
-            10
-        );
-
-
-    if (Number.isNaN(index) ||
-        !voices[index]) {
-
-        return;
-    }
-
-
-    selectedVoiceA =
-        voices[index];
-}
-
-
-function changeVoiceB() {
-
-    const index =
-        parseInt(
-            document.getElementById(
-                "voiceBSelect"
-            ).value,
-            10
-        );
-
-
-    if (Number.isNaN(index) ||
-        !voices[index]) {
-
-        return;
-    }
-
-
-    selectedVoiceB =
-        voices[index];
-}
 
 		// =========================================================
 		// Reading Progress
@@ -1363,41 +1099,34 @@ function changeVoiceB() {
         		remaining +
         		" 句）";
 		}
-
-
         // =========================================================
-        // Load Voices
-
-        synth.onvoiceschanged =
-            loadVoices;
+        // Load Piper Voices
 
         loadVoices();
-
-
-        /*
-            Chrome / Edge 有時第一次 getVoices()
-            會回傳空陣列。
-
-            再稍後讀取一次。
-        */
-        setTimeout(
-            loadVoices,
-            500
-        );
-
-
         updateWeakCount();
+
+
+
 
 
         // =========================================================
         // Start Speaking
 
-        function startSpeaking() {
+        async function startSpeaking() {
 
             const mode =
                 document.getElementById(
                     "modeSelect"
                 ).value;
+
+
+            try {
+                await ensurePiperReady();
+            }
+            catch (error) {
+                handlePiperError(error);
+                return;
+            }
 
 
             const activeItems =
@@ -1453,7 +1182,7 @@ function changeVoiceB() {
             /*
                 終止上一輪朗讀。
             */
-            synth.cancel();
+            piperTts.stop();
 
             speechSessionId++;
 
@@ -1745,179 +1474,16 @@ function changeVoiceB() {
                 ? 0
                 : delay;
         }
-
-
         // =========================================================
         // Dialog Queue Mode
 
-        function queueDialog(
-            sessionId) {
-
-            if (sessionId !== speechSessionId) {
-                return;
-            }
-
-
-            if (!isSpeaking ||
-                isPaused) {
-
-                return;
-            }
-
-
-            if (currentIndex >= lines.length) {
-
-                isSpeaking = false;
-
-                clearHighlight();
-
-                return;
-            }
-
-
-            const startIndex =
-                currentIndex;
-
-            const rate =
-                parseFloat(
-                    document.getElementById(
-                        "rateSelect"
-                    ).value
-                );
-
-
-            for (
-                let index = startIndex;
-                index < lines.length;
-                index++
-            ) {
-
-                const text =
-                    lines[index];
-
-                const speaker =
-                    lineSpeakers[index] ||
-                    (
-                        index % 2 === 0
-                            ? "A"
-                            : "B"
-                    );
-
-                const isSpeakerA =
-                    speaker === "A";
-
-                const voice =
-                    isSpeakerA
-                        ? selectedVoiceA
-                        : selectedVoiceB;
-
-                const utterance =
-                    new SpeechSynthesisUtterance(
-                        text
-                    );
-
-
-                utterance.voice =
-                    voice;
-
-                utterance.lang =
-                    voice && voice.lang
-                        ? voice.lang
-                        : "en-US";
-
-                utterance.pitch =
-                    1.0;
-
-                utterance.rate =
-                    rate;
-
-                utterance.volume =
-                    1.0;
-
-
-                utterance.onstart =
-                    function () {
-
-                        if (sessionId !== speechSessionId ||
-                            !isSpeaking ||
-                            isPaused) {
-
-                            return;
-                        }
-
-
-                        currentIndex =
-                            index;
-
-						updateReadingProgress();
-
-                        if (isHighlightEnabled) {
-
-                            highlightCurrentText(
-                                text,
-                                speaker
-                            );
-
-                        }
-                        else {
-
-                            clearHighlight();
-                        }
-                    };
-
-
-                utterance.onend =
-                    function () {
-
-                        if (sessionId !== speechSessionId ||
-                            !isSpeaking ||
-                            isPaused) {
-
-                            return;
-                        }
-
-
-                        if (index === lines.length - 1) {
-
-                            currentIndex =
-                                lines.length;
-
-                            isSpeaking =
-                                false;
-
-                            clearHighlight();
-
-                        }
-                        else {
-
-                            currentIndex =
-                                index + 1;
-                        }
-                    };
-
-
-                utterance.onerror =
-                    function (event) {
-
-                        if (event.error === "interrupted" ||
-                            event.error === "canceled") {
-
-                            return;
-                        }
-
-
-                        console.error(
-                            "Speech error:",
-                            event.error
-                        );
-                    };
-
-
-                synth.speak(
-                    utterance
-                );
-            }
+        function queueDialog(sessionId) {
+            /* Piper 無法像 speechSynthesis 一次排入整批 queue。 */
+            speakDialogLine(sessionId);
         }
+
+
+
 
 
         // =========================================================
@@ -2010,12 +1576,10 @@ function changeVoiceB() {
                 }
             );
         }
-
-
         // =========================================================
-        // Common Speech Function
+        // Common Piper Speech Function
 
-        function speakText(
+        async function speakText(
             text,
             voice,
             sessionId,
@@ -2026,151 +1590,82 @@ function changeVoiceB() {
                 return;
             }
 
+            updateReadingProgress();
 
-            const utterance =
-                new SpeechSynthesisUtterance(
-                    text
+            if (isHighlightEnabled) {
+                highlightCurrentText(text, speaker);
+            }
+            else {
+                clearHighlight();
+            }
+
+            try {
+                await piperTts.speak(
+                    text,
+                    {
+                        voiceName: voice,
+                        rate: parseFloat(
+                            document.getElementById(
+                                "rateSelect"
+                            ).value
+                        )
+                    }
                 );
+            }
+            catch (error) {
+                if (sessionId !== speechSessionId) {
+                    return;
+                }
+                handlePiperError(error);
+                return;
+            }
 
+            if (sessionId !== speechSessionId ||
+                isPaused) {
+                return;
+            }
 
-            utterance.voice =
-                voice;
-
-
-            /*
-                使用目前 Voice 自己的語系。
-                例如 Samantha = en-US，Daniel = en-GB。
-            */
-            utterance.lang =
-                voice && voice.lang
-                    ? voice.lang
-                    : "en-US";
-
-
-            /*
-                不人工改變男女聲 Pitch。
-
-                Natural Voice 本身已經包含
-                原本男性 / 女性的聲音特徵。
-            */
-            utterance.pitch =
-                1.0;
-
-
-            /*
-                即時取得目前語速。
-            */
-            utterance.rate =
-                parseFloat(
-                    document.getElementById(
-                        "rateSelect"
-                    ).value
-                );
-
-
-            utterance.volume =
-                1.0;
-
-
-            // -----------------------------------------------------
-            // Start
-
-            utterance.onstart =
-                function () {
-
-                    if (sessionId !== speechSessionId) {
-                        return;
-                    }
-
-					updateReadingProgress();
-
-                    if (isHighlightEnabled) {
-
-                        highlightCurrentText(
-                            text,
-                            speaker
-                        );
-
-                    }
-                    else {
-
-                        clearHighlight();
-                    }
-                };
-
-
-            // -----------------------------------------------------
-            // End
-
-            utterance.onend =
-                function () {
-
-                    if (sessionId !== speechSessionId) {
-                        return;
-                    }
-
-
-                    if (callback) {
-                        callback();
-                    }
-                };
-
-
-            // -----------------------------------------------------
-            // Error
-
-            utterance.onerror =
-                function (event) {
-
-                    /*
-                        cancel() 可能會產生
-                        interrupted / canceled，
-                        這種不用跳錯誤。
-                    */
-
-                    if (event.error === "interrupted" ||
-                        event.error === "canceled") {
-
-                        return;
-                    }
-
-
-                    console.error(
-                        "Speech error:",
-                        event.error
-                    );
-                };
-
-
-            synth.speak(
-                utterance
-            );
+            if (callback) {
+                callback();
+            }
         }
+
+
+
 
 		// =========================================================
 		// Previous / Next
 
-		function previousLine() {
+		async function previousLine() {
 
-    		moveToLine(
+    		await moveToLine(
         		-1
     		);
 		}
 
 
-		function nextLine() {
+		async function nextLine() {
 
-    		moveToLine(
+    		await moveToLine(
         		1
     		);
 		}
 
 
-        function moveToLine(
+        async function moveToLine(
             offset) {
 
             const activeItems =
                 getActiveItems();
+
+
+            try {
+                await ensurePiperReady();
+            }
+            catch (error) {
+                handlePiperError(error);
+                return;
+            }
 
 
             if (activeItems.length === 0) {
@@ -2235,7 +1730,7 @@ function changeVoiceB() {
             }
 
 
-            synth.cancel();
+            piperTts.stop();
 
             speechSessionId++;
 
@@ -2660,10 +2155,19 @@ function clearWeakList() {
         // =========================================================
         // Chunk Practice
 
-        function practiceCurrentChunk() {
+        async function practiceCurrentChunk() {
 
             const activeItems =
                 getActiveItems();
+
+
+            try {
+                await ensurePiperReady();
+            }
+            catch (error) {
+                handlePiperError(error);
+                return;
+            }
 
 
             if (activeItems.length === 0) {
@@ -2765,7 +2269,7 @@ function clearWeakList() {
                     : selectedVoiceA;
 
 
-            synth.cancel();
+            piperTts.stop();
 
             speechSessionId++;
 
@@ -2922,9 +2426,7 @@ function clearWeakList() {
                 }
             );
         }
-
-
-        function speakChunkText(
+        async function speakChunkText(
             text,
             voice,
             sessionId,
@@ -2934,114 +2436,75 @@ function clearWeakList() {
                 return;
             }
 
-
-            const utterance =
-                new SpeechSynthesisUtterance(
-                    text
+            try {
+                await piperTts.speak(
+                    text,
+                    {
+                        voiceName: voice,
+                        rate: parseFloat(
+                            document.getElementById(
+                                "rateSelect"
+                            ).value
+                        )
+                    }
                 );
+            }
+            catch (error) {
+                if (sessionId !== speechSessionId) {
+                    return;
+                }
+                handlePiperError(error);
+                return;
+            }
 
+            if (sessionId !== speechSessionId) {
+                return;
+            }
 
-            utterance.voice =
-                voice;
-
-            utterance.lang =
-                voice && voice.lang
-                    ? voice.lang
-                    : "en-US";
-
-            utterance.pitch =
-                1.0;
-
-            utterance.rate =
-                parseFloat(
-                    document.getElementById(
-                        "rateSelect"
-                    ).value
-                );
-
-            utterance.volume =
-                1.0;
-
-
-            utterance.onend =
-                function () {
-
-                    if (sessionId !== speechSessionId) {
-                        return;
-                    }
-
-
-                    if (callback) {
-                        callback();
-                    }
-                };
-
-
-            utterance.onerror =
-                function (event) {
-
-                    if (event.error === "interrupted" ||
-                        event.error === "canceled") {
-
-                        return;
-                    }
-
-
-                    console.error(
-                        "Chunk speech error:",
-                        event.error
-                    );
-                };
-
-
-            synth.speak(
-                utterance
-            );
+            if (callback) {
+                callback();
+            }
         }
-
-
-		// =========================================================
+        // =========================================================
         // Pause / Resume
 
-        function togglePause() {
+        async function togglePause() {
 
             if (!isSpeaking) {
                 return;
             }
 
-
             if (isPaused) {
-
-                /*
-                    目前採用：
-                    暫停後重新從目前這一句開始。
-
-                    相較 speechSynthesis.resume()
-                    在 Chrome / Edge 上比較穩定。
-                */
-
                 isPaused = false;
 
-                const currentSessionId =
-                    speechSessionId;
+                if (piperTts.pendingPlayback) {
+                    try {
+                        await piperTts.resume();
+                    }
+                    catch (error) {
+                        handlePiperError(error);
+                    }
+                }
+                else {
+                    speakNext(speechSessionId);
+                }
 
-                speakNext(
-                    currentSessionId
-                );
+                return;
+            }
 
+            isPaused = true;
+
+            if (piperTts.pendingPlayback) {
+                piperTts.pause();
             }
             else {
-
-                isPaused = true;
-
-                /*
-                    cancel() 會停止目前正在講的內容。
-
-                    Resume 時會重新朗讀目前這一句。
-                */
-                synth.cancel();
+                /* 仍在產生音訊時先取消；繼續時會重播目前句。 */
+                piperTts.stop();
             }
         }
+
+
+
 
 
         // =========================================================
@@ -3051,7 +2514,7 @@ function clearWeakList() {
 
             speechSessionId++;
 
-            synth.cancel();
+            piperTts.stop();
 
             isSpeaking = false;
 
@@ -3549,6 +3012,31 @@ function clearWeakList() {
                                 : "每行輸入一個單字或句子...";
                 }
             );
+
+    
+
+        // =========================================================
+        // Expose UI Handlers For Inline HTML Events
+
+        Object.assign(
+            window,
+            {
+                startSpeaking,
+                togglePause,
+                stopSpeaking,
+                previousLine,
+                nextLine,
+                practiceCurrentChunk,
+                shuffleWords,
+                clearInput,
+                toggleHighlight,
+                addCurrentToWeakList,
+                toggleWeakList,
+                clearWeakList,
+                changeVoiceA,
+                changeVoiceB
+            }
+        );
 
     </script>
 
