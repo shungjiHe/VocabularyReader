@@ -8,6 +8,11 @@ const PIPER_VOICES = [
   { id: 'en_GB-alan-medium', label: 'British English · Alan medium' },
 ];
 
+function isIOS() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
 export class PiperAudioNotEnabledError extends Error {
   constructor(message = 'Piper audio is not enabled. Tap Enable Piper Audio first.') {
     super(message);
@@ -176,6 +181,11 @@ export class PiperTtsEngine {
       const oldestKey = this.cache.keys().next().value;
       const oldest = this.cache.get(oldestKey);
       if (oldest?.url) URL.revokeObjectURL(oldest.url);
+
+      if (oldest) {
+          oldest.audioBuffer = null;
+          oldest.blob = null;
+      }
       this.cache.delete(oldestKey);
     }
     return entry;
@@ -287,7 +297,12 @@ export class PiperTtsEngine {
     await this.init();
     const entry = await this.getAudioEntry(text, voiceName, rate, segments, operationId);
     if (!entry || this.cancelled || operationId !== this.operationId) return;
-    try { return await this.playWithWebAudio(entry, rate); }
+
+    if (isIOS()) {
+      return this.playWithHtmlAudio(entry, rate);
+    }
+
+try { return await this.playWithWebAudio(entry, rate); }
     catch (error) {
       if (isPiperAudioBlocked(error)) throw error;
       this.onStatus({ key: 'error', label: 'Web Audio failed', detail: error.message });
