@@ -1072,8 +1072,7 @@
                     selectedVoiceA =
                         voices.find(
                             voice =>
-                                /Guy|David|Daniel|Mark|Ryan|George|Alex|Fred|Male/i.test(
-                                    voice.label
+                                /Guy/i.test(voice.label)
                                 )
                         )?.name ||
                         voices[0].name;
@@ -1089,8 +1088,7 @@
                         voices.find(
                             voice =>
                                 voice.name !== selectedVoiceA &&
-                                /Aria|Jenny|Samantha|Zira|Ava|Susan|Victoria|Serena|Female/i.test(
-                                    voice.label
+                                /Jenny/i.test(voice.label)
                                 )
                         )?.name ||
                         voices.find(
