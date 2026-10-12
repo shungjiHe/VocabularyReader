@@ -587,7 +587,7 @@
                 <div
                     id="piperStatus"
                     class="tts-status">
-                    Piper：第一次播放會初始化音訊並下載所選語音模型。
+                    TTS：正在偵測裝置...
                 </div>
 
             </div>
@@ -739,6 +739,31 @@
 
         // =========================================================
         // Global Variables
+
+        const browserSynth =
+            window.speechSynthesis || null;
+
+
+        function isMobileDevice() {
+
+            if (typeof navigator.userAgentData?.mobile === "boolean") {
+                return navigator.userAgentData.mobile;
+            }
+
+            return /Android|iPhone|iPad|iPod|Mobile/i.test(
+                navigator.userAgent
+            ) ||
+            (
+                navigator.platform === "MacIntel" &&
+                navigator.maxTouchPoints > 1
+            );
+        }
+
+
+        const useBrowserTts =
+            !!browserSynth &&
+            !isMobileDevice();
+
 
         const piperTts =
             new PiperTtsEngine({
@@ -901,9 +926,13 @@
     		weakItems = [];
 		}
         // =========================================================
-        // Piper TTS
+        // TTS (Desktop Browser / Mobile Piper)
 
         function updatePiperStatus(info) {
+
+            if (useBrowserTts) {
+                return;
+            }
 
             const status =
                 document.getElementById("piperStatus");
@@ -961,7 +990,136 @@
         }
 
 
+        function handleTtsError(error) {
+
+            if (!useBrowserTts) {
+                handlePiperError(error);
+                return;
+            }
+
+            console.error(
+                "Browser TTS error:",
+                error
+            );
+
+            alert(
+                "瀏覽器 TTS 發生錯誤：" +
+                (error?.message || "Unknown error")
+            );
+        }
+
+
         function loadVoices() {
+
+            // -----------------------------------------------------
+            // Desktop: Browser speechSynthesis voices
+
+            if (useBrowserTts) {
+
+                const browserVoices =
+                    browserSynth
+                        .getVoices()
+                        .filter(
+                            voice =>
+                                /^en(?:-|_|$)/i.test(
+                                    voice.lang || ""
+                                )
+                        );
+
+
+                voices =
+                    browserVoices.map(
+                        voice => ({
+                            name:
+                                voice.voiceURI ||
+                                voice.name,
+
+                            label:
+                                voice.name +
+                                " (" +
+                                voice.lang +
+                                ")",
+
+                            browserVoice:
+                                voice
+                        })
+                    );
+
+
+                if (voices.length === 0) {
+
+                    updateVoiceDisplay();
+
+                    const status =
+                        document.getElementById(
+                            "piperStatus"
+                        );
+
+                    if (status) {
+                        status.textContent =
+                            "TTS：等待瀏覽器英文語音載入...";
+                    }
+
+                    return;
+                }
+
+
+                // A：優先男聲
+                if (!voices.some(
+                        voice =>
+                            voice.name === selectedVoiceA)) {
+
+                    selectedVoiceA =
+                        voices.find(
+                            voice =>
+                                /Guy|David|Daniel|Mark|Ryan|George|Alex|Fred|Male/i.test(
+                                    voice.label
+                                )
+                        )?.name ||
+                        voices[0].name;
+                }
+
+
+                // B：優先女聲
+                if (!voices.some(
+                        voice =>
+                            voice.name === selectedVoiceB)) {
+
+                    selectedVoiceB =
+                        voices.find(
+                            voice =>
+                                voice.name !== selectedVoiceA &&
+                                /Aria|Jenny|Samantha|Zira|Ava|Susan|Victoria|Serena|Female/i.test(
+                                    voice.label
+                                )
+                        )?.name ||
+                        voices.find(
+                            voice =>
+                                voice.name !== selectedVoiceA
+                        )?.name ||
+                        voices[0].name;
+                }
+
+
+                updateVoiceDisplay();
+
+
+                const status =
+                    document.getElementById(
+                        "piperStatus"
+                    );
+
+                if (status) {
+                    status.textContent =
+                        "TTS：電腦使用瀏覽器語音";
+                }
+
+                return;
+            }
+
+
+            // -----------------------------------------------------
+            // Mobile / Tablet: Piper voices
 
             voices =
                 PIPER_VOICES.map(
@@ -971,6 +1129,7 @@
                     })
                 );
 
+
             if (!voices.some(
                     voice =>
                         voice.name === selectedVoiceA)) {
@@ -978,6 +1137,7 @@
                 selectedVoiceA =
                     voices[0]?.name || null;
             }
+
 
             if (!voices.some(
                     voice =>
@@ -992,7 +1152,19 @@
                     null;
             }
 
+
             updateVoiceDisplay();
+
+
+            const status =
+                document.getElementById(
+                    "piperStatus"
+                );
+
+            if (status) {
+                status.textContent =
+                    "TTS：手機 / 平板使用 Piper 語音";
+            }
         }
 
 
@@ -1048,6 +1220,168 @@
         }
 
 
+        async function ensureTtsReady() {
+
+            if (!useBrowserTts) {
+                await ensurePiperReady();
+                return;
+            }
+
+
+            loadVoices();
+
+
+            // Chrome / Edge 有時頁面剛開啟時 getVoices() 會暫時是空陣列。
+            for (
+                let attempt = 0;
+                attempt < 10 && voices.length === 0;
+                attempt++
+            ) {
+                await new Promise(
+                    resolve =>
+                        setTimeout(resolve, 100)
+                );
+
+                loadVoices();
+            }
+
+
+            if (voices.length === 0) {
+                throw new Error(
+                    "找不到可用的英文瀏覽器語音。"
+                );
+            }
+        }
+
+
+        function getBrowserVoice(
+            voiceName) {
+
+            return voices.find(
+                voice =>
+                    voice.name === voiceName
+            )?.browserVoice ||
+            null;
+        }
+
+
+        function stopTts() {
+
+            if (useBrowserTts) {
+                browserSynth.cancel();
+                return;
+            }
+
+            piperTts.stop();
+        }
+
+
+        function speakWithBrowserTts(
+            text,
+            voiceName,
+            rate) {
+
+            return new Promise(
+                function (
+                    resolve,
+                    reject) {
+
+                    const utterance =
+                        new SpeechSynthesisUtterance(
+                            text
+                        );
+
+
+                    const voice =
+                        getBrowserVoice(
+                            voiceName
+                        );
+
+
+                    if (voice) {
+                        utterance.voice = voice;
+                        utterance.lang = voice.lang;
+                    }
+                    else {
+                        utterance.lang = "en-US";
+                    }
+
+
+                    utterance.rate = rate;
+                    utterance.pitch = 1.0;
+                    utterance.volume = 1.0;
+
+
+                    utterance.onend =
+                        function () {
+                            resolve();
+                        };
+
+
+                    utterance.onerror =
+                        function (event) {
+
+                            if (event.error === "canceled" ||
+                                event.error === "interrupted") {
+
+                                resolve();
+                                return;
+                            }
+
+                            reject(
+                                new Error(
+                                    "SpeechSynthesis: " +
+                                    event.error
+                                )
+                            );
+                        };
+
+
+                    browserSynth.speak(
+                        utterance
+                    );
+                }
+            );
+        }
+
+
+        async function speakWithSelectedTts(
+            text,
+            voiceName) {
+
+            const rate =
+                parseFloat(
+                    document.getElementById(
+                        "rateSelect"
+                    ).value
+                );
+
+
+            if (useBrowserTts) {
+
+                await speakWithBrowserTts(
+                    text,
+                    voiceName,
+                    rate
+                );
+
+                return;
+            }
+
+
+            await piperTts.speak(
+                text,
+                {
+                    voiceName:
+                        voiceName,
+
+                    rate:
+                        rate
+                }
+            );
+        }
+
+
 
 
 		// =========================================================
@@ -1100,7 +1434,12 @@
         		" 句）";
 		}
         // =========================================================
-        // Load Piper Voices
+        // Load TTS Voices
+
+        if (useBrowserTts) {
+            browserSynth.onvoiceschanged =
+                loadVoices;
+        }
 
         loadVoices();
         updateWeakCount();
@@ -1121,10 +1460,10 @@
 
 
             try {
-                await ensurePiperReady();
+                await ensureTtsReady();
             }
             catch (error) {
-                handlePiperError(error);
+                handleTtsError(error);
                 return;
             }
 
@@ -1182,7 +1521,7 @@
             /*
                 終止上一輪朗讀。
             */
-            piperTts.stop();
+            stopTts();
 
             speechSessionId++;
 
@@ -1478,7 +1817,7 @@
         // Dialog Queue Mode
 
         function queueDialog(sessionId) {
-            /* Piper 無法像 speechSynthesis 一次排入整批 queue。 */
+            /* 兩種 TTS 都統一逐句控制，保留 A/B 與間隔邏輯。 */
             speakDialogLine(sessionId);
         }
 
@@ -1577,7 +1916,7 @@
             );
         }
         // =========================================================
-        // Common Piper Speech Function
+        // Common Speech Function
 
         async function speakText(
             text,
@@ -1600,23 +1939,16 @@
             }
 
             try {
-                await piperTts.speak(
+                await speakWithSelectedTts(
                     text,
-                    {
-                        voiceName: voice,
-                        rate: parseFloat(
-                            document.getElementById(
-                                "rateSelect"
-                            ).value
-                        )
-                    }
+                    voice
                 );
             }
             catch (error) {
                 if (sessionId !== speechSessionId) {
                     return;
                 }
-                handlePiperError(error);
+                handleTtsError(error);
                 return;
             }
 
@@ -1660,10 +1992,10 @@
 
 
             try {
-                await ensurePiperReady();
+                await ensureTtsReady();
             }
             catch (error) {
-                handlePiperError(error);
+                handleTtsError(error);
                 return;
             }
 
@@ -1730,7 +2062,7 @@
             }
 
 
-            piperTts.stop();
+            stopTts();
 
             speechSessionId++;
 
@@ -2162,10 +2494,10 @@ function clearWeakList() {
 
 
             try {
-                await ensurePiperReady();
+                await ensureTtsReady();
             }
             catch (error) {
-                handlePiperError(error);
+                handleTtsError(error);
                 return;
             }
 
@@ -2269,7 +2601,7 @@ function clearWeakList() {
                     : selectedVoiceA;
 
 
-            piperTts.stop();
+            stopTts();
 
             speechSessionId++;
 
@@ -2437,23 +2769,16 @@ function clearWeakList() {
             }
 
             try {
-                await piperTts.speak(
+                await speakWithSelectedTts(
                     text,
-                    {
-                        voiceName: voice,
-                        rate: parseFloat(
-                            document.getElementById(
-                                "rateSelect"
-                            ).value
-                        )
-                    }
+                    voice
                 );
             }
             catch (error) {
                 if (sessionId !== speechSessionId) {
                     return;
                 }
-                handlePiperError(error);
+                handleTtsError(error);
                 return;
             }
 
@@ -2473,6 +2798,50 @@ function clearWeakList() {
             if (!isSpeaking) {
                 return;
             }
+
+
+            // -----------------------------------------------------
+            // Desktop Browser TTS
+
+            if (useBrowserTts) {
+
+                if (isPaused) {
+
+                    isPaused = false;
+
+
+                    if (browserSynth.paused) {
+                        browserSynth.resume();
+                    }
+                    else if (
+                        !browserSynth.speaking &&
+                        !browserSynth.pending
+                    ) {
+                        speakNext(
+                            speechSessionId
+                        );
+                    }
+
+
+                    return;
+                }
+
+
+                isPaused = true;
+
+
+                if (browserSynth.speaking ||
+                    browserSynth.pending) {
+                    browserSynth.pause();
+                }
+
+
+                return;
+            }
+
+
+            // -----------------------------------------------------
+            // Mobile Piper TTS
 
             if (isPaused) {
                 isPaused = false;
@@ -2506,7 +2875,6 @@ function clearWeakList() {
 
 
 
-
         // =========================================================
         // Stop
 
@@ -2514,7 +2882,7 @@ function clearWeakList() {
 
             speechSessionId++;
 
-            piperTts.stop();
+            stopTts();
 
             isSpeaking = false;
 
